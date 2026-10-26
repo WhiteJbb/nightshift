@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './exec.ts';
-import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile } from './logs.ts';
 import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
 vi.mock('./exec.ts', () => ({ run: vi.fn() }));
@@ -210,6 +210,9 @@ describe('pattern helpers', () => {
     // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
     expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
     expect(isBusy([...foot], [], true)).toBe(false);
+    // 지난 대화를 올려 보는 중 (그사이 새 글이 오면 표시가 바뀐다)
+    for (const hint of ['Jump to bottom (click) ↓', '1 new message (click) ↓', '12 new messages (click) ↓']) expect(scrolledUp(['older', `  text ${hint}`, '─────', '❯ ', '─────', 'footer'])).toBe(true);
+    expect(scrolledUp(['older', 'latest', '─────', '❯ ', '─────', 'footer'])).toBe(false);
     // 입력칸 안에 친 가로줄은 테두리가 아니다 (입력칸 안의 줄은 들여 써진다)
     expect(aboveInput(['answer', '─────', '❯ notes', '  ─────', '  more', '─────', 'footer'])).toEqual(['answer']);
     // 입력칸에 친 글이 스피너처럼 생겨도 일이 아니다
