@@ -1,6 +1,6 @@
 {
   "name": "nightshift",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "description": "휴대폰에서 tmux 속 Claude Code·Codex 세션을 보고 조종하는 원격 개발 대시보드",
   "license": "MIT",
