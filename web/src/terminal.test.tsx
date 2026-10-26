@@ -339,6 +339,30 @@ test('on Windows/Linux, Ctrl+Backspace deletes a word (^W) while Ctrl+←/→ st
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true }))).toBe(true);
 });
 
+test('a Ctrl+letter pressed while composing Korean (keyCode 229, dropped by xterm) goes after the composed text, once', async () => {
+  fetchMock.mockResolvedValue(json(200, { ok: true }));
+  await renderTab(project(ONE));
+  await init();
+  const composing = (code: string) => {
+    const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true });
+    Object.defineProperty(ev, 'keyCode', { value: 229 });
+    return ev;
+  };
+  // 조합 중 Ctrl+X: xterm 에 넘기지 않고, 조합이 끝나 확정된 '내' 가 먼저 간 뒤 ^X 를 보낸다
+  let handled = true;
+  act(() => void (handled = xterm().key!(composing('KeyX'))));
+  expect(handled).toBe(false);
+  act(() => xterm().type('내'));
+  await tick(50);
+  expect(posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0)))).join('')).toBe('내\x18');
+  // 브라우저가 조합을 끝내고 같은 키를 보통 키로 다시 보내면 그쪽(xterm)에만 맡겨 두 번 가지 않는다
+  const before = posts().length;
+  act(() => void xterm().key!(composing('KeyC')));
+  expect(xterm().key!(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true }))).toBe(true);
+  await tick(50);
+  expect(posts()).toHaveLength(before);
+});
+
 test('Ctrl+V on a Mac reads an image from this browser\'s clipboard, uploads it and pastes the path; without one it sends ^V; keys typed meanwhile follow', async () => {
   platform('MacIntel');
   let items = [{ types: ['text/plain', 'image/png'], getType: async (t: string) => new Blob(['png!'], { type: t }) }];

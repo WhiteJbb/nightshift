@@ -31,6 +31,8 @@ const FLING_DECAY = 0.996;
 const FLING_STOP = 0.03;
 /** 터치로 이만큼(ms) 움직이지 않고 누르고 있으면 글자 고르기 */
 const LONG_PRESS_MS = 500;
+/** 한글 조합 중에 누른 Ctrl+글자를 이만큼(ms) 뒤에 보낸다. 조합된 글(xterm 이 setTimeout 0 으로 보낸다)이 먼저 가게 */
+const IME_CTRL_MS = 30;
 /**
  * 클립보드에 쓴다. 이 서버는 보통 http(비보안 출처)로 열려 navigator.clipboard 가 없으니
  * 숨긴 입력칸을 골라 execCommand('copy') 로 쓴다 (클릭 직후라 브라우저가 허용한다).
@@ -313,6 +315,8 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       'alt+Backspace': '\x1b\x7f',
       ...(mac ? { 'meta+ArrowLeft': '\x01', 'meta+ArrowRight': '\x05', 'meta+Backspace': '\x15' } : { 'ctrl+Backspace': '\x17' }),
     };
+    let imeCtrl: ReturnType<typeof setTimeout> | undefined;
+    let imeCtrlCode: string | null = null;
     term.attachCustomKeyEventHandler((ev) => {
       const mods = [ev.metaKey && 'meta', ev.ctrlKey && 'ctrl', ev.altKey && 'alt', ev.shiftKey && 'shift'].filter(Boolean).join('+');
       // 복사: ⌘C(맥)는 브라우저가 한다. Windows·Linux 터미널처럼 Ctrl+Shift+C 와, 고른 글이 있을 때의 Ctrl+C 도 복사한다.
@@ -336,6 +340,26 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         if (ev.type === 'keydown' && held === null) holdUntil(clipboardImage().then((image) => (image ? uploadImage(image) : '\x16')));
         ev.preventDefault();
         return false;
+      }
+      // 한글 등을 조합하는 중에 누른 Ctrl+글자는 keyCode 229 로 와서 xterm 이 버리고 조합만 끝난다. 그러면 Claude Code 의
+      // Ctrl+X → Ctrl+S(작업 중 바로 보내기)가 첫 키를 잃고, 홀로 간 Ctrl+S 는 입력을 치워 버린다(stash).
+      // 조합된 글이 간 뒤에 그 제어 문자를 보낸다
+      if (ev.keyCode === 229 && mods === 'ctrl' && /^Key[A-Z]$/.test(ev.code)) {
+        if (ev.type === 'keydown' && canInput) {
+          clearTimeout(imeCtrl);
+          const code = ev.code;
+          imeCtrlCode = code;
+          imeCtrl = setTimeout(() => {
+            imeCtrlCode = null;
+            send(String.fromCharCode(code.charCodeAt(3) - 64));
+          }, IME_CTRL_MS);
+        }
+        return false;
+      }
+      // 조합을 끝낸 브라우저가 같은 키를 보통 키로 다시 보내면 미뤄 둔 것은 버리고 xterm 에 맡긴다 (두 번 가지 않게)
+      if (ev.type === 'keydown' && ev.code === imeCtrlCode && mods === 'ctrl') {
+        clearTimeout(imeCtrl);
+        imeCtrlCode = null;
       }
       const combo = `${mods}+${ev.key}`;
       if (combo === 'meta+k') {
@@ -510,6 +534,7 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       el.removeEventListener('touchcancel', cancelPress);
       stopFling();
       cancelPress();
+      clearTimeout(imeCtrl);
       settle();
       ro?.disconnect();
       window.removeEventListener('resize', fitFont);
