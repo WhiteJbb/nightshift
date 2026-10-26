@@ -48,6 +48,8 @@ export function aboveInput(lines: string[]): string[] {
 const SPINNER_RE = /^[·✢✳✶✻✽*∗] [^\s…]+…/;
 // 권한 모드로 시작하는 Claude Code 하단 줄("⏵⏵ auto mode on …", "⏸ plan mode on …")이 구분점으로 끝남 = 들어가지 않는 항목을 뺐다
 const FOOTER_CUT_RE = /^\s*(?:⏵⏵|⏸)\s.*\s·\s*$/;
+// 턴은 끝났지만 백그라운드 에이전트·워크플로를 기다리는 Claude Code 의 턴 끝 줄 ("✻ Waiting for 1 background agent to finish")
+const WAITING_RE = /^✻ (?:.* · )?Waiting for \d+ (?:background agents?|dynamic workflows?)\b/;
 /**
  * 화면 마지막 몇 줄에 "작업 중" 표시(busyPatterns)가 있는지. 상태 줄은 맨 아래에 있으니 본문 인용에는 잘 걸리지 않는다.
  * changed: 지난번 본 뒤로 화면 글이 바뀌었는지 (표시가 통째로 빠진 좁은 화면에서만 쓴다)
@@ -63,6 +65,9 @@ export function isBusy(lines: string[], patterns: string[], changed = false): bo
   };
   const tail = lines.filter((l) => l.trim() !== '');
   if (tail.slice(-6).some((l) => match(l) || cut(l))) return true;
+  // 백그라운드 에이전트를 기다리는 중이면 끝나는 대로 이어서 일한다. 입력칸 바로 위의 마지막 대화 항목(첫 칸에서 시작하는 줄)이
+  // 그 줄일 때만 본다: 다 끝난 뒤의 짧은 후속 답에는 턴 끝 줄이 새로 붙지 않아 옛 줄이 화면에 남는다. 지난 대화를 올려 보는 중이면 보지 않는다
+  if (!scrolledUp(lines) && WAITING_RE.test(aboveInput(tail).findLast((l) => /^\S/.test(l)) ?? '')) return true;
   // 휴대폰 폭(43칸)에선 Claude Code 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남긴다 ("… (shift+tab to cycle) ·").
   // 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어, 스피너 줄이 보이거나(생각·도구 실행) 화면이 바뀔 때(답을 쓰는 중)만 일하는 것으로 본다
   if (!tail.slice(-3).some((l) => FOOTER_CUT_RE.test(l))) return false;
