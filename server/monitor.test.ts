@@ -143,6 +143,35 @@ describe('Monitor', () => {
     expect(m.snapshot.projects[0]!.tmux.lastOutputChangeAt).toBe(new Date(now).toISOString());
   });
 
+  it('at phone width, where Claude Code drops "esc to interrupt" from its status line, a changing screen is work', async () => {
+    let now = T0;
+    const foot = ['❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    const pane = (cols: number, lines: string[]) => ({ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols, lines });
+    const state = { panes: [pane(140, ['old answer', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'])] };
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: state.panes, waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    const agent = () => m.snapshot.projects[0]!.tmux.agent;
+    const tick = async (cols: number, lines: string[]) => {
+      now += 5000;
+      state.panes = [pane(cols, lines)];
+      await m.tick();
+      return agent();
+    };
+    await m.tick();
+    expect(agent()).toBe('ready');
+    // 휴대폰에서 열어 43칸으로 맞춘 직후의 다시 그림(두 tick)은 일이 아니다
+    expect(await tick(43, ['answer', 'rewrapped', ...foot])).toBe('ready');
+    expect(await tick(43, ['answer', 'rewrapped', 'status', ...foot])).toBe('ready');
+    // 답을 써 내려가는 동안
+    expect(await tick(43, ['the harbor was', ...foot])).toBe('busy');
+    expect(await tick(43, ['the harbor was quiet', ...foot])).toBe('busy');
+    // 다 쓰고 멈춤: 두 tick 조용하면 끝난 것
+    const done = ['the end', '✻ Sautéed for 5s · done 12:20 AM', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'];
+    await tick(43, done);
+    expect(await tick(43, done)).toBe('ready');
+  });
+
   it('isolates a failing project and notifies subscribers', async () => {
     const m = new Monitor({ config, collector: fakeCollector({ output: [], git: git(), gitThrows: true }), runs: noRuns, now: () => T0 });
     const seen: Snapshot[] = [];

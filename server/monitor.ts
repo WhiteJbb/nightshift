@@ -381,8 +381,9 @@ export class Monitor {
       const sizeKey = raw.panes.map((x) => `${x.id}:${x.cols ?? 0}`).join(',');
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
       tr.sizeKey = sizeKey;
-      if (tr.output !== null && text !== tr.output && tr.settle === 0) tr.outputChangedAt = nowIso;
-      const busy = plain.some((lines) => isBusy(lines, this.opts.config.busyPatterns));
+      const changed = tr.output !== null && text !== tr.output && tr.settle === 0;
+      if (changed) tr.outputChangedAt = nowIso;
+      const busy = plain.some((lines) => isBusy(lines, this.opts.config.busyPatterns, changed));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
       if (busy || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
       tr.quietTicks = busy ? 0 : tr.quietTicks + 1;

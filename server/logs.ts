@@ -34,8 +34,13 @@ const VOLATILE_RE = /[\d\u2800-\u28ff✢✳✶✻✽✺·∗*|/\\—-]/g;
 export const stripVolatile = (s: string): string => s.replace(VOLATILE_RE, '');
 
 const PROMPT_SCAN_LINES = 15;
-/** 화면 마지막 몇 줄에 "작업 중" 표시(busyPatterns)가 있는지. 상태 줄은 맨 아래에 있으니 본문 인용에는 잘 걸리지 않는다 */
-export function isBusy(lines: string[], patterns: string[]): boolean {
+// Claude Code 의 작업 중 스피너 줄 ("✢ Nesting… (2s · ↓ 55 tokens)"). 끝난 뒤의 "✻ Sautéed for 5s · done" 과 다르다
+const SPINNER_RE = /^[·✢✳✶✻✽*∗] [^\s…]+…/;
+/**
+ * 화면 마지막 몇 줄에 "작업 중" 표시(busyPatterns)가 있는지. 상태 줄은 맨 아래에 있으니 본문 인용에는 잘 걸리지 않는다.
+ * changed: 지난번 본 뒤로 화면 글이 바뀌었는지 (표시가 통째로 빠진 좁은 화면에서만 쓴다)
+ */
+export function isBusy(lines: string[], patterns: string[], changed = false): boolean {
   if (!patterns.length) return false;
   const match = compileMatcher(patterns);
   // 좁은 화면(휴대폰)에선 상태 줄이 "esc to interrup…" 처럼 잘린다. 잘린 끝이 표시의 앞부분(3자 이상)이면 같은 것으로 본다
@@ -44,7 +49,12 @@ export function isBusy(lines: string[], patterns: string[]): boolean {
     const m = /^(.*?)\s*…\s*$/.exec(line.toLowerCase());
     return !!m && needles.some((n) => [...Array(n.length).keys()].some((k) => k >= 3 && m[1]!.endsWith(n.slice(0, k))));
   };
-  return lines.filter((l) => l.trim() !== '').slice(-6).some((l) => match(l) || cut(l));
+  const tail = lines.filter((l) => l.trim() !== '');
+  if (tail.slice(-6).some((l) => match(l) || cut(l))) return true;
+  // 휴대폰 폭(43칸)에선 Claude Code 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남긴다 ("… (shift+tab to cycle) ·").
+  // 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어, 스피너 줄이 보이거나(생각·도구 실행) 화면이 바뀔 때(답을 쓰는 중)만 일하는 것으로 본다
+  if (!tail.slice(-3).some((l) => /\s·\s*$/.test(l))) return false;
+  return changed || tail.slice(-12).some((l) => SPINNER_RE.test(l.trim()));
 }
 const CHOICE_RE = /^[\s│┃║▌]*(?:[❯›>]\s*)?([1-9])[.)]\s+(.+?)[\s│┃║]*$/;
 /** 프롬프트 줄부터 아래로 "1. Yes" 같은 번호 선택지를 모은다 (같은 번호는 처음 것만). */

@@ -197,6 +197,21 @@ describe('pattern helpers', () => {
     expect(isBusy(['  ⏵⏵ auto mode on · 1 shell · ↓ to manag…'], p)).toBe(false);
   });
 
+  it('on a phone-width screen whose status line dropped the marker, sees work by the spinner or a changing screen', () => {
+    const p = ['esc to interrupt'];
+    const foot = ['❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    // 생각·도구 실행: 스피너 줄이 팁 줄 아래로 밀려 있어도 본다
+    expect(isBusy(['⏺ Counting directories', '✢ Nesting… (2s · ↓ 55 tokens)', '  ⎿  Tip: Did you know you can drag and', '     drop image files into your terminal?', '─────', ...foot], p)).toBe(true);
+    // 답을 쓰는 중: 스피너는 없고 글만 바뀐다
+    expect(isBusy(['  the lamp knew, because', '─────', ...foot], p)).toBe(false);
+    expect(isBusy(['  the lamp knew, because', '─────', ...foot], p, true)).toBe(true);
+    // 끝난 줄은 스피너가 아니다
+    expect(isBusy(['✻ Sautéed for 5s · done 12:20 AM', ...foot], p)).toBe(false);
+    // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
+    expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
+    expect(isBusy([...foot], [], true)).toBe(false);
+  });
+
   it('finds the agent behind a node pane from ps output', () => {
     const ps = ['ttys005  Ss   -zsh', 'ttys005  S+   node /opt/homebrew/bin/codex', 'ttys007  S+   node server.js', '??       S    /Users/u/.codex/bin/codex app-server'].join('\n');
     expect(agentOnTty(ps, 'ttys005')).toBe('codex');
