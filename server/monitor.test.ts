@@ -234,6 +234,14 @@ describe('Monitor', () => {
     // 위로 올려 본 채 화면 폭이 바뀌고(다시 그림), 맨 아래로 돌아오면 줄이 다시 나뉘어 있다. 일이 아니다
     for (const cols of [43, 50, 50, 50]) expect(await tick([claude(cols, ['history 3', 'more  Jump to bottom (click) ↓']), shell])).toBe('ready');
     expect(await tick([claude(50, ['the end ✻ Sautéed for 5s · done 12:20 AM'.slice(0, 20), 'done 12:20 AM']), shell])).toBe('ready');
+    // 화면 높이만 바뀌어 맨 위 줄이 잘리거나 드러나도 일이 아니다
+    const screen = ['older 1', 'older 2', 'older 3', ...Array.from({ length: 8 }, (_, i) => `recent ${i}`)];
+    for (let i = 0; i <= READY_TICKS; i++) await tick([claude(50, screen), shell]);
+    for (const n of [9, 10, 11]) expect(await tick([claude(50, screen.slice(-n)), shell])).toBe('ready');
+    // 다른 pane 의 크기가 바뀌어도, 답을 쓰고 있는 Claude 는 계속 일하는 중이다
+    const writing = ['a', 'a b', 'a b c', 'a b c d'];
+    expect(await tick([claude(50, [...screen, writing[0]!]), shell])).toBe('busy');
+    for (const [k, cols] of [[1, 60], [2, 70], [3, 80]] as const) expect(await tick([claude(50, [...screen, writing[k]!]), { ...shell, cols }])).toBe('busy');
   });
 
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {
