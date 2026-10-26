@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './exec.ts';
-import { compileMatcher, findErrors, findPrompt, isBusy, promptChoices, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, stripAnsi, stripVolatile } from './logs.ts';
 import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
 vi.mock('./exec.ts', () => ({ run: vi.fn() }));
@@ -210,6 +210,8 @@ describe('pattern helpers', () => {
     // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
     expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
     expect(isBusy([...foot], [], true)).toBe(false);
+    // 입력칸 안에 친 가로줄은 테두리가 아니다 (입력칸 안의 줄은 들여 써진다)
+    expect(aboveInput(['answer', '─────', '❯ notes', '  ─────', '  more', '─────', 'footer'])).toEqual(['answer']);
     // 입력칸에 친 글이 스피너처럼 생겨도 일이 아니다
     expect(isBusy(['answer', '─────', '❯ look at this:', '  ✢ Nesting… (2s)', ...foot], p)).toBe(false);
     // Claude Code 하단 줄이 아닌, 구분점으로 끝나는 셸 출력은 아니다

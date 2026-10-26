@@ -36,9 +36,9 @@ export const stripVolatile = (s: string): string => s.replace(VOLATILE_RE, '');
 const PROMPT_SCAN_LINES = 15;
 /** Claude Code 에서 지난 대화를 위로 올려 보는 중인지 (화면 아래쪽에 "Jump to bottom" 이 뜬다) */
 export const scrolledUp = (lines: string[]): boolean => aboveInput(lines.filter((l) => l.trim() !== '')).slice(-3).some((l) => l.includes('Jump to bottom'));
-/** Claude Code 입력칸(맨 아래 가로줄 둘 사이)부터 아래를 뺀 화면. 가로줄이 둘 없으면 그대로 */
+/** Claude Code 입력칸(맨 아래 가로줄 둘 사이)부터 아래를 뺀 화면. 가로줄이 둘 없으면 그대로. 입력칸 테두리는 첫 칸부터 그어진다(입력칸 안에 친 줄은 들여 써진다) */
 export function aboveInput(lines: string[]): string[] {
-  const rules = lines.flatMap((l, i) => (/^─{3,}/.test(l.trim()) ? [i] : []));
+  const rules = lines.flatMap((l, i) => (/^─{3,}\s*$/.test(l) ? [i] : []));
   return rules.length >= 2 ? lines.slice(0, rules.at(-2)) : lines;
 }
 // Claude Code 의 작업 중 스피너 줄 ("✢ Nesting… (2s · ↓ 55 tokens)"). 끝난 뒤의 "✻ Sautéed for 5s · done" 과 다르다
