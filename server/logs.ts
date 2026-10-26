@@ -34,6 +34,11 @@ const VOLATILE_RE = /[\d\u2800-\u28ff✢✳✶✻✽✺·∗*|/\\—-]/g;
 export const stripVolatile = (s: string): string => s.replace(VOLATILE_RE, '');
 
 const PROMPT_SCAN_LINES = 15;
+/** Claude Code 입력칸(맨 아래 가로줄 둘 사이)부터 아래를 뺀 화면. 가로줄이 둘 없으면 그대로 */
+export function aboveInput(lines: string[]): string[] {
+  const rules = lines.flatMap((l, i) => (/^─{3,}/.test(l.trim()) ? [i] : []));
+  return rules.length >= 2 ? lines.slice(0, rules.at(-2)) : lines;
+}
 // Claude Code 의 작업 중 스피너 줄 ("✢ Nesting… (2s · ↓ 55 tokens)"). 끝난 뒤의 "✻ Sautéed for 5s · done" 과 다르다
 const SPINNER_RE = /^[·✢✳✶✻✽*∗] [^\s…]+…/;
 // 권한 모드로 시작하는 Claude Code 하단 줄("⏵⏵ auto mode on …", "⏸ plan mode on …")이 구분점으로 끝남 = 들어가지 않는 항목을 뺐다

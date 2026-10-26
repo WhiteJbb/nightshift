@@ -145,7 +145,7 @@ describe('Monitor', () => {
 
   it('at phone width, where Claude Code drops "esc to interrupt" from its status line, a changing screen is work', async () => {
     let now = T0;
-    const foot = ['❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    const foot = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
     const pane = (cols: number, lines: string[]) => ({ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols, lines });
     const state = { panes: [pane(140, ['old answer', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'])] };
     const collector = fakeCollector({ output: [], git: git() });
@@ -167,15 +167,18 @@ describe('Monitor', () => {
     expect(await tick(43, ['the harbor was', ...foot])).toBe('busy');
     expect(await tick(43, ['the harbor was quiet', ...foot])).toBe('busy');
     // 다 쓰고 멈춤: 두 tick 조용하면 끝난 것
-    const done = ['the end', '✻ Sautéed for 5s · done 12:20 AM', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'];
+    const done = ['the end', '✻ Sautéed for 5s · done 12:20 AM', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'];
     await tick(43, done);
     expect(await tick(43, done)).toBe('ready');
+    // 쉬는 중인데 하단 줄 다른 항목이 빠져 구분점이 남은 화면: 입력칸에 글을 쳐도(보내기 전) 일이 아니다
+    const typing = (prompt: string) => ['the end', '✻ Sautéed for 5s · done 12:20 AM', '─────', prompt, '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    for (const prompt of ['❯ ', '❯ please', '❯ please add', '❯ please add tests']) expect(await tick(43, typing(prompt))).toBe('ready');
   });
 
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {
     let now = T0;
     // 쉬는 Claude 인데 하단 줄 항목("1 feedback draft" 등)이 빠져 구분점이 남은 화면
-    const claude = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 43, lines: ['answer', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'] };
+    const claude = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 43, lines: ['answer', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'] };
     const shell = (lines: string[]) => ({ id: '%2', window: 1, windowName: 'w', index: 0, command: 'zsh', active: false, cols: 43, lines });
     const state = { panes: [claude, shell(['$ npm run dev'])] };
     const collector = fakeCollector({ output: [], git: git() });
