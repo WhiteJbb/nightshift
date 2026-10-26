@@ -109,10 +109,11 @@ export interface TmuxInfo {
   /** 프롬프트 아래의 번호 선택지 ("❯ 1. Yes", "2. No") 와 그 pane. 화면에서 버튼으로 바로 답한다 */
   waitingChoices?: { pane: string; options: { key: string; label: string }[] };
   /**
-   * 화면에 "작업 중" 표시(esc to interrupt)를 한 번이라도 띄운 에이전트 세션이면: busy = 지금 일하는 중, ready = 할 일을 마치고 기다림.
+   * 화면에 "작업 중" 표시(esc to interrupt)를 한 번이라도 띄운 에이전트 세션이면: busy = 지금 일하는 중, ready = 할 일을 마치고 기다림,
+   * waiting = 턴은 끝났지만 백그라운드 에이전트·Monitor 를 기다림 (끝나면 스스로 이어서 일한다).
    * 이런 세션은 화면이 바뀌었는지(스크롤·입력·크기 변경도 바꾼다)가 아니라 이 표시로 상태를 정한다.
    */
-  agent?: 'busy' | 'ready';
+  agent?: 'busy' | 'ready' | 'waiting';
   /** 에이전트 세션이 작업 중 표시를 마지막으로 띄운 시각. 스크롤·입력으로는 바뀌지 않아 "마지막으로 일한 때"로 쓴다 */
   lastBusyAt?: string | null;
   /** 예: tmux attach -t session-name */

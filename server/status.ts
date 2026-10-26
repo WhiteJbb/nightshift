@@ -46,6 +46,8 @@ export function judge(i: StatusInput): ProjectStatus {
 
   // 에이전트 세션: 작업 중 표시가 없으면 할 일을 마치고 기다리는 것이다. 화면이 바뀌어도(스크롤·입력·크기) 일하는 게 아니다
   if (i.tmux.exists && i.tmux.agent === 'ready') return { state: 'idle', reasons: ['작업을 마치고 다음 지시를 기다리는 중'] };
+  // 백그라운드 에이전트·Monitor 를 기다리는 동안은 화면이 오래 그대로여도 끝난 것도 멈춘 것도 아니다 (끝나면 이어서 일한다)
+  if (i.tmux.exists && i.tmux.agent === 'waiting') return { state: 'running', reasons: ['백그라운드 작업(에이전트·Monitor)을 기다리는 중'] };
 
   const gitIdle = minutesSince(i.lastGitChangeAt, i.now);
   // 세션이 없으면 볼 출력이 없으므로 Git 활동만으로 판정한다.

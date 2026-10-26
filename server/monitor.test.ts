@@ -274,6 +274,30 @@ describe('Monitor', () => {
     }
   });
 
+  it('an agent waiting on a Monitor stays waiting, not done or stalled, until it picks the work up again', async () => {
+    let now = T0;
+    const box = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on · 1 monitor · ↓ to manage'];
+    const state = { lines: ['⏺ Watching for flag.txt.', '✻ Worked for 7s · done 1:50 AM · 1 monitor still running', ...box] };
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: [{ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 140, lines: state.lines }], waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    const app = () => m.snapshot.projects[0]!;
+    // 한 시간 동안 화면도 Git 도 그대로
+    for (let i = 0; i < 12; i++) {
+      await m.tick();
+      expect(app().tmux.agent).toBe('waiting');
+      expect(app().status.state).toBe('running');
+      now += 5 * 60_000;
+    }
+    // Monitor 가 알려 와 이어서 일하고 끝냄
+    state.lines = [...state.lines.slice(0, 2), '⏺ flag.txt appeared.', '✻ Worked for 2s · done 2:50 AM', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'];
+    for (let i = 0; i < READY_TICKS; i++) {
+      now += 5000;
+      await m.tick();
+    }
+    expect(app().tmux.agent).toBe('ready');
+  });
+
   it('isolates a failing project and notifies subscribers', async () => {
     const m = new Monitor({ config, collector: fakeCollector({ output: [], git: git(), gitThrows: true }), runs: noRuns, now: () => T0 });
     const seen: Snapshot[] = [];

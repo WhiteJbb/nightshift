@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -412,10 +412,11 @@ export class Monitor {
         return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
       };
       const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
+      const waiting = !busy && plain.some(waitingOnBackground);
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
-      if (busy || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
-      tr.quietTicks = busy ? 0 : tr.quietTicks + 1;
-      if (tr.agent) agent = tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
+      if (busy || waiting || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
+      tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;
+      if (tr.agent) agent = waiting ? 'waiting' : tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;
       tr.seen = seen;
