@@ -36,6 +36,8 @@ export const stripVolatile = (s: string): string => s.replace(VOLATILE_RE, '');
 const PROMPT_SCAN_LINES = 15;
 // Claude Code 의 작업 중 스피너 줄 ("✢ Nesting… (2s · ↓ 55 tokens)"). 끝난 뒤의 "✻ Sautéed for 5s · done" 과 다르다
 const SPINNER_RE = /^[·✢✳✶✻✽*∗] [^\s…]+…/;
+// 권한 모드로 시작하는 Claude Code 하단 줄("⏵⏵ auto mode on …", "⏸ plan mode on …")이 구분점으로 끝남 = 들어가지 않는 항목을 뺐다
+const FOOTER_CUT_RE = /^\s*(?:⏵⏵|⏸)\s.*\s·\s*$/;
 /**
  * 화면 마지막 몇 줄에 "작업 중" 표시(busyPatterns)가 있는지. 상태 줄은 맨 아래에 있으니 본문 인용에는 잘 걸리지 않는다.
  * changed: 지난번 본 뒤로 화면 글이 바뀌었는지 (표시가 통째로 빠진 좁은 화면에서만 쓴다)
@@ -53,7 +55,7 @@ export function isBusy(lines: string[], patterns: string[], changed = false): bo
   if (tail.slice(-6).some((l) => match(l) || cut(l))) return true;
   // 휴대폰 폭(43칸)에선 Claude Code 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남긴다 ("… (shift+tab to cycle) ·").
   // 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어, 스피너 줄이 보이거나(생각·도구 실행) 화면이 바뀔 때(답을 쓰는 중)만 일하는 것으로 본다
-  if (!tail.slice(-3).some((l) => /\s·\s*$/.test(l))) return false;
+  if (!tail.slice(-3).some((l) => FOOTER_CUT_RE.test(l))) return false;
   return changed || tail.slice(-12).some((l) => SPINNER_RE.test(l.trim()));
 }
 const CHOICE_RE = /^[\s│┃║▌]*(?:[❯›>]\s*)?([1-9])[.)]\s+(.+?)[\s│┃║]*$/;

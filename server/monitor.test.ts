@@ -172,6 +172,24 @@ describe('Monitor', () => {
     expect(await tick(43, done)).toBe('ready');
   });
 
+  it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {
+    let now = T0;
+    // 쉬는 Claude 인데 하단 줄 항목("1 feedback draft" 등)이 빠져 구분점이 남은 화면
+    const claude = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 43, lines: ['answer', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'] };
+    const shell = (lines: string[]) => ({ id: '%2', window: 1, windowName: 'w', index: 0, command: 'zsh', active: false, cols: 43, lines });
+    const state = { panes: [claude, shell(['$ npm run dev'])] };
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: state.panes, waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    await m.tick();
+    for (const log of ['GET / 200', 'GET /a 200', 'GET /b 200']) {
+      now += 5000;
+      state.panes = [claude, shell(['$ npm run dev', log])];
+      await m.tick();
+      expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
+    }
+  });
+
   it('isolates a failing project and notifies subscribers', async () => {
     const m = new Monitor({ config, collector: fakeCollector({ output: [], git: git(), gitThrows: true }), runs: noRuns, now: () => T0 });
     const seen: Snapshot[] = [];

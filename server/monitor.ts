@@ -92,7 +92,8 @@ interface Tracked {
   logEnd: LogPos | null;
   /** 확인 처리 전까지 남겨 두는 로그 오류. 스캔 창(파일 끝 64KB)에서 밀려나도 잊지 않는다 */
   logErrors: string[];
-  output: string | null;
+  /** pane 마다 비교용으로 정규화한 출력 */
+  output: string[] | null;
   outputChangedAt: string | null;
   /** pane 크기 ("%1:120,%2:80"). 바뀌면 프로그램이 화면을 다시 그리는데, 그건 작업이 아니다 */
   sizeKey: string | null;
@@ -368,8 +369,8 @@ export class Monitor {
     if (raw.exists) {
       // 어느 pane 이든 출력이 바뀌면 활동이다. pane 정보가 없으면 활성 pane 출력만 본다.
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
-      const joined = plain.map((lines) => lines.join('\n')).join('\f');
-      const text = this.opts.config.ignoreSpinnerChanges ? stripVolatile(joined) : joined;
+      const texts = plain.map((lines) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(lines.join('\n')) : lines.join('\n')));
+      const prev = tr.output;
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
         waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
@@ -381,15 +382,16 @@ export class Monitor {
       const sizeKey = raw.panes.map((x) => `${x.id}:${x.cols ?? 0}`).join(',');
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
       tr.sizeKey = sizeKey;
-      const changed = tr.output !== null && text !== tr.output && tr.settle === 0;
-      if (changed) tr.outputChangedAt = nowIso;
-      const busy = plain.some((lines) => isBusy(lines, this.opts.config.busyPatterns, changed));
+      if (prev !== null && texts.join('\f') !== prev.join('\f') && tr.settle === 0) tr.outputChangedAt = nowIso;
+      // 그 pane 자체의 화면이 바뀌었는지 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게. pane 수가 바뀐 tick 은 아니라고 본다)
+      const paneChanged = (i: number) => prev !== null && prev.length === texts.length && prev[i] !== texts[i] && tr.settle === 0;
+      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, paneChanged(i)));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
       if (busy || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
       tr.quietTicks = busy ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
       if (tr.settle > 0) tr.settle -= 1;
-      tr.output = text;
+      tr.output = texts;
       // tmux 의 활동 시각은 스피너 출력에도 갱신되므로 최초 관측의 초기값으로만 쓰고,
       // 이후에는 정규화한 출력 비교로만 갱신한다. demo 수집기는 이 값을 직접 제어한다.
       if (this.opts.demo) lastOutputChangeAt = latest(tr.outputChangedAt, raw.lastActivityAt);

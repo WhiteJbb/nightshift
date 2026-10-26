@@ -210,6 +210,8 @@ describe('pattern helpers', () => {
     // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
     expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
     expect(isBusy([...foot], [], true)).toBe(false);
+    // Claude Code 하단 줄이 아닌, 구분점으로 끝나는 셸 출력은 아니다
+    expect(isBusy(['$ make', 'step 1 ·'], p, true)).toBe(false);
   });
 
   it('finds the agent behind a node pane from ps output', () => {
