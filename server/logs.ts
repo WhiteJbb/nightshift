@@ -61,7 +61,10 @@ export function isBusy(lines: string[], patterns: string[], changed = false): bo
   // 휴대폰 폭(43칸)에선 Claude Code 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남긴다 ("… (shift+tab to cycle) ·").
   // 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어, 스피너 줄이 보이거나(생각·도구 실행) 화면이 바뀔 때(답을 쓰는 중)만 일하는 것으로 본다
   if (!tail.slice(-3).some((l) => FOOTER_CUT_RE.test(l))) return false;
-  return changed || tail.slice(-12).some((l) => SPINNER_RE.test(l.trim()));
+  // 입력칸(치는 중인 글) 위만 본다. 위로 올려 보는 중("Jump to bottom")이면 화면 변화는 스크롤이다
+  // ponytail: 일하는 중에 올려 보면 스피너가 안 보여 그동안은 쉬는 것으로 보일 수 있다
+  const above = aboveInput(tail).slice(-12);
+  return above.some((l) => SPINNER_RE.test(l.trim())) || (changed && !above.some((l) => l.includes('Jump to bottom')));
 }
 const CHOICE_RE = /^[\s│┃║▌]*(?:[❯›>]\s*)?([1-9])[.)]\s+(.+?)[\s│┃║]*$/;
 /** 프롬프트 줄부터 아래로 "1. Yes" 같은 번호 선택지를 모은다 (같은 번호는 처음 것만). */
