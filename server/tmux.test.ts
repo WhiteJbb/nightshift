@@ -209,6 +209,8 @@ describe('pattern helpers', () => {
     // 다 끝나고 결과를 받은 뒤에는 옛 줄이 남아 있어도 기다리는 게 아니다
     const after = ['› Message from @general-purpose (ctrl+o to expand)', '⏺ The subagent finished.', '⏺ Agent "Run tests" finished · 1m 48s'];
     expect(isBusy([...waiting, ...after, '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p)).toBe(false);
+    // 지난 대화를 올려 보다 옛 줄이 보이는 것은 기다리는 게 아니다
+    expect(isBusy([...waiting, '  older text Jump to bottom (click) ↓', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p)).toBe(false);
     // 답 본문에 같은 말이 있어도 턴 끝 줄이 아니다
     expect(isBusy(['⏺ ✻ Waiting for 1 background agent to finish', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p)).toBe(false);
   });
