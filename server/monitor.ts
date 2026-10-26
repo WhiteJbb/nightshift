@@ -401,7 +401,8 @@ export class Monitor {
           const cols = raw.panes[i]?.cols ?? 0;
           const before = tr.seen?.[id];
           const resized = before !== undefined && before.cols !== cols;
-          const body = scrolledUp(lines) ? (resized ? null : (before?.body ?? null)) : norm(aboveInput(lines).slice(-8).join('\n'));
+          // 캡처에 실패하면(빈 화면) 기준을 비운다: 돌아온 같은 화면을 새 출력으로 보지 않게
+          const body = lines.length === 0 ? null : scrolledUp(lines) ? (resized ? null : (before?.body ?? null)) : norm(aboveInput(lines).slice(-8).join('\n'));
           return [id, { cols, body, quiet: resized ? RESIZE_SETTLE_TICKS : Math.max(0, (before?.quiet ?? 0) - 1) }];
         }),
       );
