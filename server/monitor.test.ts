@@ -220,6 +220,15 @@ describe('Monitor', () => {
       await m.tick();
       expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
     }
+    // Claude 를 위로 올려 본 채 활성 pane 을 바꾸면 pane 순서가 바뀐다 (활성 pane 이 앞). 다시 맨 아래로 와도 일이 아니다
+    const log = shell(['$ npm run dev', 'GET /b 200']);
+    const scrolled = { ...claude, lines: ['history 3', 'more  Jump to bottom (click) ↓', ...claude.lines.slice(1)] };
+    for (const panes of [[scrolled, log], [log, scrolled], [log, scrolled], [log, scrolled], [log, scrolled], [log, claude]]) {
+      now += 5000;
+      state.panes = panes;
+      await m.tick();
+      expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
+    }
   });
 
   it('isolates a failing project and notifies subscribers', async () => {

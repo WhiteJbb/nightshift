@@ -93,8 +93,8 @@ interface Tracked {
   /** 확인 처리 전까지 남겨 두는 로그 오류. 스캔 창(파일 끝 64KB)에서 밀려나도 잊지 않는다 */
   logErrors: string[];
   output: string | null;
-  /** pane 마다, Claude Code 입력칸을 뺀 화면 (휴대폰 폭에서 작업 중 표시가 빠졌을 때 작업을 가늠한다). 위로 올려 본 화면밖에 못 봤으면 null */
-  bodies: (string | null)[] | null;
+  /** pane id 마다, Claude Code 입력칸을 뺀 화면 (휴대폰 폭에서 작업 중 표시가 빠졌을 때 작업을 가늠한다). 위로 올려 본 화면밖에 못 봤으면 null */
+  bodies: Record<string, string | null> | null;
   outputChangedAt: string | null;
   /** pane 크기 ("%1:120,%2:80"). 바뀌면 프로그램이 화면을 다시 그리는데, 그건 작업이 아니다 */
   sizeKey: string | null;
@@ -375,8 +375,10 @@ export class Monitor {
       // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다.
       // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다.
       // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다)
-      const prev = tr.bodies?.length === plain.length ? tr.bodies : null;
-      const bodies = plain.map((lines, i) => (scrolledUp(lines) ? (prev?.[i] ?? null) : norm(aboveInput(lines).slice(-20).join('\n'))));
+      // pane 순서는 활성 pane 이 앞이라 바뀔 수 있어 id 로 맞춘다
+      const ids = raw.panes.length ? raw.panes.map((x) => x.id) : [''];
+      const prev = tr.bodies ?? {};
+      const bodies = Object.fromEntries(plain.map((lines, i) => [ids[i]!, scrolledUp(lines) ? (prev[ids[i]!] ?? null) : norm(aboveInput(lines).slice(-20).join('\n'))]));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
         waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
@@ -389,7 +391,8 @@ export class Monitor {
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
       tr.sizeKey = sizeKey;
       if (tr.output !== null && text !== tr.output && tr.settle === 0) tr.outputChangedAt = nowIso;
-      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, prev?.[i] != null && bodies[i] !== null && prev[i] !== bodies[i] && tr.settle === 0));
+      const changedPane = (id: string) => prev[id] != null && bodies[id] != null && prev[id] !== bodies[id] && tr.settle === 0;
+      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
       if (busy || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
       tr.quietTicks = busy ? 0 : tr.quietTicks + 1;
