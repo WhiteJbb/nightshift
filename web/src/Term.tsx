@@ -31,7 +31,7 @@ const FLING_DECAY = 0.996;
 const FLING_STOP = 0.03;
 /** 터치로 이만큼(ms) 움직이지 않고 누르고 있으면 글자 고르기 */
 const LONG_PRESS_MS = 500;
-/** 한글 조합 중에 누른 Ctrl+글자: 붙일 확정된 글이 이만큼(ms) 안에 안 나가면 혼자 보낸다 */
+/** 한글 조합 중에 누른 Ctrl+글자: 조합이 이만큼(ms) 안에 끝나지 않으면 혼자 보낸다 */
 const IME_CTRL_MS = 100;
 /**
  * 클립보드에 쓴다. 이 서버는 보통 http(비보안 출처)로 열려 navigator.clipboard 가 없으니
@@ -247,21 +247,27 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         void flush();
       });
     };
-    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 확정된 글을 xterm 이 보낼 때 그 뒤에 붙여 함께 보낸다:
-    // 순서가 지켜지고, 보내다 실패하면 같이 버려진다
+    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 xterm 이 확정된 글을 보낸 바로 뒤에 보낸다
     let afterCompose: string | null = null;
     let afterComposeTimer: ReturnType<typeof setTimeout> | undefined;
-    // 조합이 끝나(compositionend) xterm 이 곧 보낼 확정된 글 (xterm 은 setTimeout 0 뒤나, 그 전에 키가 오면 그 키 앞에 보낸다). 보내면 null
-    let composed: string | null = null;
+    // 조합이 끝나(compositionend) xterm 이 확정된 글을 보내기 전까지 (xterm 은 textarea 에서 읽어 setTimeout 0 뒤에 보낸다)
+    let delivering = false;
     const sendAfterCompose = () => {
       clearTimeout(afterComposeTimer);
       if (afterCompose !== null) send(afterCompose);
       afterCompose = null;
     };
-    const onCompositionEnd = (e: CompositionEvent) => {
-      composed = e.data || null;
-      // 확정된 글이 없으면 붙일 데가 없다
-      if (composed === null) sendAfterCompose();
+    const onCompositionEnd = () => {
+      delivering = true;
+      const before = failures;
+      // xterm 보다 나중에 등록한 리스너라 이 타이머는 xterm 이 글을 보낸 뒤에 돈다.
+      // ponytail: 그 사이(같은 몇 ms)에 다음 키를 누르면 그 키가 먼저 간다. 사람이 누르는 빠르기로는 생기지 않는다
+      setTimeout(() => {
+        delivering = false;
+        // 확정된 글을 보내지 못했으면 버린다 (Ctrl+D 따위가 앞 글 없이 가지 않게)
+        if (failures !== before) afterCompose = null;
+        sendAfterCompose();
+      }, 0);
     };
     term.textarea?.addEventListener('compositionend', onCompositionEnd);
     const input = term.onData((d) => {
@@ -270,13 +276,6 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       d = d.replace(MOTION_RE, '');
       if (pasteOnRightClick) d = d.replace(RIGHT_BUTTON_RE, '');
       if (d === '') return;
-      // 마우스 보고 같은 다른 글에는 붙이지 않는다
-      if (composed !== null && d === composed) {
-        composed = null;
-        if (afterCompose !== null) d += afterCompose;
-        clearTimeout(afterComposeTimer);
-        afterCompose = null;
-      }
       send(d);
     });
 
@@ -365,25 +364,21 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       }
       // 한글 등 IME 가 켜진 채 누른 Ctrl+글자는 keyCode 229 로 와서 xterm 이 버린다(조합 중이었으면 조합만 끝난다). 그러면 Claude Code 의
       // Ctrl+X → Ctrl+S(작업 중 바로 보내기)가 첫 키를 잃고, 홀로 간 Ctrl+S 는 입력을 치워 버린다(stash). 제어 문자를 직접 보낸다:
-      // 조합 중이거나 확정된 글이 아직 안 나갔으면 그 글 뒤에 붙인다
+      // 조합 중이거나 확정된 글이 아직 안 나갔으면 그 글 뒤에 보낸다
       if (ev.keyCode === 229 && mods === 'ctrl' && /^Key[A-Z]$/.test(ev.code)) {
         if (ev.type === 'keydown' && canInput) {
           const byte = String.fromCharCode(ev.code.charCodeAt(3) - 64);
           if (afterCompose !== null) afterCompose += byte;
-          else if (ev.isComposing || composed !== null) {
+          else if (ev.isComposing || delivering) {
             afterCompose = byte;
-            // ponytail: 확정된 글이 끝내 안 나가면(브라우저마다 다른 조합 처리) 잠시 뒤 혼자 보낸다. 그 사이에 친 키보다는 늦게 간다
-            afterComposeTimer = setTimeout(() => {
-              composed = null;
-              sendAfterCompose();
-            }, IME_CTRL_MS);
+            // 이 키로 조합이 끝나지 않으면(compositionend 가 안 오면) 잠시 뒤 혼자 보낸다
+            afterComposeTimer = setTimeout(sendAfterCompose, IME_CTRL_MS);
           } else send(byte);
         }
         return false;
       }
-      // 다른 키를 누를 때 확정된 글이 이미 나갔는데(못 알아봤다) 붙일 것이 남았으면 이 키 앞에 보낸다.
-      // 아직 안 나갔으면 xterm 이 이 키 앞에 그 글을 보내며 붙는다
-      if (ev.type === 'keydown' && afterCompose !== null && composed === null && !ev.isComposing) sendAfterCompose();
+      // 조합이 끝나지 않은 채 다른 키를 누르면 기다리던 것을 이 키 앞에 보낸다
+      if (ev.type === 'keydown' && afterCompose !== null && !delivering && !ev.isComposing) sendAfterCompose();
       const combo = `${mods}+${ev.key}`;
       if (combo === 'meta+k') {
         if (ev.type === 'keydown') term.clear();
