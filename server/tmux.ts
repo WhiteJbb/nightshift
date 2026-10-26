@@ -234,9 +234,9 @@ export async function sendRaw(id: string, bytes: Uint8Array): Promise<string | n
   return r.code === 0 ? null : r.stderr.trim() || 'tmux send-keys 실패';
 }
 
-/** pane 에 특수 키 하나를 보낸다. key 는 호출부가 허용 목록으로 검증한 값이어야 한다. */
-export async function sendKey(id: string, key: string): Promise<string | null> {
-  const r = await run('tmux', ['send-keys', '-t', id, key]);
+/** pane 에 특수 키를 보낸다. 키는 호출부가 허용 목록으로 검증한 값이어야 한다. */
+export async function sendKey(id: string, ...keys: string[]): Promise<string | null> {
+  const r = await run('tmux', ['send-keys', '-t', id, ...keys]);
   return r.code === 0 ? null : r.stderr.trim() || 'tmux send-keys 실패';
 }
 

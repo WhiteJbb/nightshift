@@ -8,12 +8,12 @@ import { sendKey, sendText } from './tmux.ts';
 export const INPUT_KEYS = ['Enter', 'Escape', 'Tab', 'BTab', 'Up', 'Down', 'Left', 'Right', 'PPage', 'NPage', 'BSpace', 'C-c', 'C-d', 'C-u', 'C-l'] as const satisfies readonly InputKey[];
 export const MAX_INPUT_CHARS = 20000;
 
-export type ParsedInput = { pane: string } & ({ text: string; enter: boolean } | { key: InputKey });
+export type ParsedInput = { pane: string } & ({ text: string; enter: boolean; now?: true } | { key: InputKey });
 
 /** 신뢰할 수 없는 요청 본문을 검증한다. 문제가 있으면 오류 메시지(문자열). */
 export function parseInput(body: unknown): ParsedInput | string {
   if (typeof body !== 'object' || body === null) return '요청 본문이 필요합니다';
-  const { pane, text, enter, key } = body as Record<string, unknown>;
+  const { pane, text, enter, now, key } = body as Record<string, unknown>;
   if (typeof pane !== 'string' || !/^%\d+$/.test(pane)) return 'pane 이 올바르지 않습니다';
   if ((text === undefined) === (key === undefined)) return 'text 와 key 중 하나만 보내야 합니다';
   if (key !== undefined) {
@@ -23,7 +23,7 @@ export function parseInput(body: unknown): ParsedInput | string {
   if (typeof text !== 'string' || text === '') return 'text 는 비어 있지 않은 문자열이어야 합니다';
   if (text.length > MAX_INPUT_CHARS) return `text 는 ${MAX_INPUT_CHARS}자 이하여야 합니다`;
   if (text.includes('\0')) return 'text 에 NUL 문자를 넣을 수 없습니다';
-  return { pane, text, enter: enter === true };
+  return { pane, text, enter: enter === true, ...(now === true && { now: true }) };
 }
 
 /** 글자를 넣고 Enter 를 누르기까지 쉬는 시간. Codex 는 글자 뒤 120ms 안의 Enter 를 붙여넣기의 줄바꿈으로 본다. */
@@ -33,9 +33,10 @@ export const ENTER_DELAY_MS = 200;
 export async function sendInput(input: ParsedInput): Promise<string | null> {
   if ('key' in input) return sendKey(input.pane, input.key);
   const error = await sendText(input.pane, input.text);
-  if (error || !input.enter) return error;
+  if (error || !(input.enter || input.now)) return error;
   await sleep(ENTER_DELAY_MS);
-  return sendKey(input.pane, 'Enter');
+  // Claude Code 의 send now(chat:sendNow). 일하는 중이면 대기열에서 기다리지 않고 바로 읽게 하고, 쉬는 중이면 Enter 처럼 보낸다
+  return input.now ? sendKey(input.pane, 'C-x', 'C-s') : sendKey(input.pane, 'Enter');
 }
 
 /** 보낸 입력을 한 줄 JSON 으로 남긴다. 기록 실패가 입력을 막지는 않는다. */
