@@ -32,6 +32,7 @@ const { FakeTerminal } = vi.hoisted(() => {
       this.key = h;
     }
     focus() {}
+    textarea = document.createElement('textarea');
     /** 마우스로 고른 글 */
     selection = '';
     hasSelection() {
@@ -339,53 +340,66 @@ test('on Windows/Linux, Ctrl+Backspace deletes a word (^W) while Ctrl+←/→ st
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true }))).toBe(true);
 });
 
-test('a Ctrl+letter pressed with the IME on (keyCode 229, dropped by xterm) still goes: right after the composed text, alone when nothing was composing, never twice', async () => {
+/** IME 가 받은 Ctrl+글자 (keyCode 229, xterm 은 버린다) */
+function imeKey(code: string, isComposing = true) {
+  const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true, isComposing });
+  Object.defineProperty(ev, 'keyCode', { value: 229 });
+  return ev;
+}
+/** 조합이 끝나 data 가 확정됐다 */
+const compositionEnd = (data: string) => act(() => void xterm().textarea.dispatchEvent(new CompositionEvent('compositionend', { data })));
+const sentText = () => posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0))));
+
+test('a Ctrl+letter pressed while composing Korean (keyCode 229, dropped by xterm) goes right after the composed text, not after other data', async () => {
   fetchMock.mockResolvedValue(json(200, { ok: true }));
   await renderTab(project(ONE));
   await init();
-  const ime = (code: string, isComposing = true) => {
-    const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true, isComposing });
-    Object.defineProperty(ev, 'keyCode', { value: 229 });
-    return ev;
-  };
-  const sent = () => posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0))));
-  // 조합 중 Ctrl+X: 조합이 끝나 확정된 '내' 와 한 요청으로, 그 뒤에 ^X. 이어 누른 Ctrl+S 는 그다음 (xterm 이 보낸다)
+  // 조합 중 Ctrl+X → 조합이 끝나 '내' 확정. 그 사이 온 마우스 보고에는 붙지 않고, xterm 이 '내' 를 보낼 때 함께 간다. 이어 누른 Ctrl+S 는 그다음
   let handled = true;
-  act(() => void (handled = xterm().key!(ime('KeyX'))));
+  act(() => void (handled = xterm().key!(imeKey('KeyX'))));
   expect(handled).toBe(false);
+  compositionEnd('내');
+  act(() => xterm().type('\x1b[<0;3;4M'));
+  await tick();
   act(() => xterm().type('내'));
   await tick();
   act(() => xterm().type('\x13'));
-  await tick(50);
-  expect(sent()).toEqual(['내\x18', '\x13']);
-  // 조합 중이 아니었으면(윈도우 IME) 바로
-  act(() => void xterm().key!(ime('KeyX', false)));
+  await tick(150);
+  expect(sentText()).toEqual(['\x1b[<0;3;4M', '내\x18', '\x13']);
+});
+
+test('a Ctrl+letter with the IME on also waits when composition ended first, goes alone when nothing is to come, and keeps order across two keys', async () => {
+  fetchMock.mockResolvedValue(json(200, { ok: true }));
+  await renderTab(project(ONE));
+  await init();
+  // 조합 끝이 키보다 먼저 와도(isComposing 은 이미 false) xterm 이 아직 안 보낸 글 뒤에 간다. 윈도우 IME 처럼 다음 키도 229 면 그 뒤에
+  compositionEnd('끝');
+  act(() => void xterm().key!(imeKey('KeyX', false)));
+  act(() => void xterm().key!(imeKey('KeyS', false)));
+  act(() => xterm().type('끝'));
+  await tick(150);
+  expect(sentText()).toEqual(['끝\x18\x13']);
+  // 보낼 확정된 글이 없으면 바로
+  act(() => void xterm().key!(imeKey('KeyD', false)));
   await tick();
-  expect(sent().at(-1)).toBe('\x18');
-  // 조합이 빈 글로 끝나면 잠시 뒤 혼자
-  act(() => void xterm().key!(ime('KeyD')));
-  await tick(50);
-  expect(sent().at(-1)).toBe('\x04');
-  // 브라우저가 같은 키를 보통 키로 다시 보내면 xterm 에만 맡긴다
-  const before = posts().length;
-  act(() => void xterm().key!(ime('KeyC')));
-  expect(xterm().key!(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true }))).toBe(true);
-  act(() => xterm().type('내'));
-  await tick(50);
-  expect(sent().slice(before)).toEqual(['내']);
+  expect(sentText().at(-1)).toBe('\x04');
+  // 조합이 빈 글로 끝나면 그때 혼자
+  act(() => void xterm().key!(imeKey('KeyU')));
+  compositionEnd('');
+  await tick();
+  expect(sentText().at(-1)).toBe('\x15');
 });
 
 test('a control key waiting for the composed text is dropped with it when sending fails', async () => {
   fetchMock.mockImplementation(async () => json(503, { error: 'down' }));
   await renderTab(project(ONE));
   await init();
-  const ev = new KeyboardEvent('keydown', { key: 'Process', code: 'KeyD', ctrlKey: true, isComposing: true });
-  Object.defineProperty(ev, 'keyCode', { value: 229 });
-  act(() => void xterm().key!(ev));
+  act(() => void xterm().key!(imeKey('KeyD')));
+  compositionEnd('내');
   act(() => xterm().type('내'));
-  await tick(50);
+  await tick(150);
   // 한 요청으로 함께 실패했다. ^D 가 따로 가지 않는다
-  expect(posts().map(([, body]) => atob(body.data!))).toHaveLength(1);
+  expect(sentText()).toEqual(['내\x04']);
   expect(screen.getByText(/입력을 보내지 못했습니다/)).toBeTruthy();
 });
 
