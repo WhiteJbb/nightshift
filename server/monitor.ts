@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { findPrompt, isBusy, promptChoices, scanLog, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -93,6 +93,11 @@ interface Tracked {
   /** 확인 처리 전까지 남겨 두는 로그 오류. 스캔 창(파일 끝 64KB)에서 밀려나도 잊지 않는다 */
   logErrors: string[];
   output: string | null;
+  /**
+   * pane id 마다 본 것 (휴대폰 폭에서 작업 중 표시가 빠졌을 때 작업을 가늠한다): 폭, Claude Code 입력칸 바로 위 화면
+   * (위로 올려 본 화면밖에 못 봤으면 null), 크기가 바뀐 뒤 아직 비교하지 않을 tick 수
+   */
+  seen: Record<string, { cols: number; body: string | null; quiet: number }> | null;
   outputChangedAt: string | null;
   /** pane 크기 ("%1:120,%2:80"). 바뀌면 프로그램이 화면을 다시 그리는데, 그건 작업이 아니다 */
   sizeKey: string | null;
@@ -368,8 +373,11 @@ export class Monitor {
     if (raw.exists) {
       // 어느 pane 이든 출력이 바뀌면 활동이다. pane 정보가 없으면 활성 pane 출력만 본다.
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
-      const joined = plain.map((lines) => lines.join('\n')).join('\f');
-      const text = this.opts.config.ignoreSpinnerChanges ? stripVolatile(joined) : joined;
+      const ids = raw.panes.length ? raw.panes.map((x) => x.id) : [''];
+      // pane 목록은 활성 pane 이 앞이라 다른 pane 을 고를 때마다 순서가 바뀐다. 비교하는 값(출력·크기)은 id 순으로 만든다
+      const byId = ids.map((id, i) => ({ id, i, cols: raw.panes[i]?.cols ?? 0 })).sort((a, b) => a.id.localeCompare(b.id));
+      const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
+      const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
         waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
@@ -378,17 +386,39 @@ export class Monitor {
         if (pane && options.length) waitingChoices = { pane: pane.id, options };
       });
       // 보는 화면에 맞춰 pane 크기를 바꾸면 프로그램이 화면을 다시 그린다. 그 변화로 "실행 중"이 되지 않게 잠시 무시한다
-      const sizeKey = raw.panes.map((x) => `${x.id}:${x.cols ?? 0}`).join(',');
+      const sizeKey = raw.panes.length ? byId.map((x) => `${x.id}:${x.cols}`).join(',') : '';
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
       tr.sizeKey = sizeKey;
       if (tr.output !== null && text !== tr.output && tr.settle === 0) tr.outputChangedAt = nowIso;
-      const busy = plain.some((lines) => isBusy(lines, this.opts.config.busyPatterns));
+      // 휴대폰 폭에서 작업 중 표시가 빠졌을 때 쓰는 pane 마다의 화면 변화. 다른 pane 의 출력·크기 변경이 섞이지 않게 pane 마다 따로 본다.
+      // 입력칸 바로 위 8줄만 보고, 입력칸에 치는 글은 뺀다. 한쪽이 다른 쪽의 끝부분이면(입력칸이 커지거나 화면 높이가 바뀌어
+      // 위쪽이 잘리거나 드러남) 새 출력이 아니다. 새 출력은 아래에 붙어 끝부분이 달라진다.
+      // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다).
+      // 폭이 바뀌면 줄이 다시 나뉘므로 기준을 버리고, 다시 그리는 동안은 비교하지 않는다
+      const seen = Object.fromEntries(
+        plain.map((lines, i) => {
+          const id = ids[i]!;
+          const cols = raw.panes[i]?.cols ?? 0;
+          const before = tr.seen?.[id];
+          const resized = before !== undefined && before.cols !== cols;
+          // 캡처에 실패하면(빈 화면) 기준을 비운다: 돌아온 같은 화면을 새 출력으로 보지 않게
+          const body = lines.length === 0 ? null : scrolledUp(lines) ? (resized ? null : (before?.body ?? null)) : norm(aboveInput(lines).slice(-8).join('\n'));
+          return [id, { cols, body, quiet: resized ? RESIZE_SETTLE_TICKS : Math.max(0, (before?.quiet ?? 0) - 1) }];
+        }),
+      );
+      const changedPane = (id: string) => {
+        const [a, b] = [tr.seen?.[id]?.body, seen[id]!];
+        const tailOf = (x: string, y: string) => x === y || x.endsWith(`\n${y}`);
+        return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
+      };
+      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
       if (busy || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
       tr.quietTicks = busy ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;
+      tr.seen = seen;
       // tmux 의 활동 시각은 스피너 출력에도 갱신되므로 최초 관측의 초기값으로만 쓰고,
       // 이후에는 정규화한 출력 비교로만 갱신한다. demo 수집기는 이 값을 직접 제어한다.
       if (this.opts.demo) lastOutputChangeAt = latest(tr.outputChangedAt, raw.lastActivityAt);
@@ -397,6 +427,7 @@ export class Monitor {
       tr.busyAt = busy ? nowIso : (tr.busyAt ?? lastOutputChangeAt);
     } else {
       tr.output = null;
+      tr.seen = null;
       tr.outputChangedAt = null;
       tr.busyAt = null;
     }
@@ -479,7 +510,7 @@ const tailRun = (r: RunResult | null): RunResult | null => {
   if (!r || (r.stdout.length <= SNAPSHOT_OUTPUT_CHARS && r.stderr.length <= SNAPSHOT_OUTPUT_CHARS)) return r;
   return { ...r, stdout: r.stdout.slice(-SNAPSHOT_OUTPUT_CHARS), stderr: r.stderr.slice(-SNAPSHOT_OUTPUT_CHARS), truncated: true };
 };
-const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, busyAt: null });
+const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, seen: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, busyAt: null });
 
 const EMPTY_GIT: GitInfo = {
   ok: false,

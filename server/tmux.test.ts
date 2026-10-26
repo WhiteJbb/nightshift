@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './exec.ts';
-import { compileMatcher, findErrors, findPrompt, isBusy, promptChoices, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile } from './logs.ts';
 import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
 vi.mock('./exec.ts', () => ({ run: vi.fn() }));
@@ -195,6 +195,33 @@ describe('pattern helpers', () => {
     expect(isBusy(['• Working (12s • esc to…'], p)).toBe(true);
     expect(isBusy(['  ⏵⏵ auto mode on (shift+tab to cycle) · esc …'], p)).toBe(true);
     expect(isBusy(['  ⏵⏵ auto mode on · 1 shell · ↓ to manag…'], p)).toBe(false);
+  });
+
+  it('on a phone-width screen whose status line dropped the marker, sees work by the spinner or a changing screen', () => {
+    const p = ['esc to interrupt'];
+    const foot = ['❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    // 생각·도구 실행: 스피너 줄이 팁 줄 아래로 밀려 있어도 본다
+    expect(isBusy(['⏺ Counting directories', '✢ Nesting… (2s · ↓ 55 tokens)', '  ⎿  Tip: Did you know you can drag and', '     drop image files into your terminal?', '─────', ...foot], p)).toBe(true);
+    // 답을 쓰는 중: 스피너는 없고 글만 바뀐다
+    expect(isBusy(['  the lamp knew, because', '─────', ...foot], p)).toBe(false);
+    expect(isBusy(['  the lamp knew, because', '─────', ...foot], p, true)).toBe(true);
+    // 끝난 줄은 스피너가 아니다
+    expect(isBusy(['✻ Sautéed for 5s · done 12:20 AM', ...foot], p)).toBe(false);
+    // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
+    expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
+    expect(isBusy([...foot], [], true)).toBe(false);
+    // 지난 대화를 올려 보는 중 (그사이 새 글이 오면 표시가 바뀐다)
+    for (const hint of ['Jump to bottom (click) ↓', '1 new message (click) ↓', '12 new messages (ctrl+end) ↓', '3 new messages ↓', 'Jump to bottom: fn+↓ to scroll']) {
+      expect(scrolledUp(['older', `  text ${hint}`, '─────', '❯ ', '─────', 'footer'])).toBe(true);
+    }
+    // 답 본문의 같은 말은 버튼이 아니다
+    for (const text of ['latest', '  The inbox has 2 new messages.', '  Press Jump to bottom to go back']) expect(scrolledUp(['older', text, '─────', '❯ ', '─────', 'footer'])).toBe(false);
+    // 입력칸 안에 친 가로줄은 테두리가 아니다 (입력칸 안의 줄은 들여 써진다)
+    expect(aboveInput(['answer', '─────', '❯ notes', '  ─────', '  more', '─────', 'footer'])).toEqual(['answer']);
+    // 입력칸에 친 글이 스피너처럼 생겨도 일이 아니다
+    expect(isBusy(['answer', '─────', '❯ look at this:', '  ✢ Nesting… (2s)', ...foot], p)).toBe(false);
+    // Claude Code 하단 줄이 아닌, 구분점으로 끝나는 셸 출력은 아니다
+    expect(isBusy(['$ make', 'step 1 ·'], p, true)).toBe(false);
   });
 
   it('finds the agent behind a node pane from ps output', () => {
