@@ -391,7 +391,7 @@ npm run demo
 ```
 
 - **터미널에 바로 치기**: 터미널을 클릭하고 키를 치면 그대로 pane으로 갑니다. 키는 서버가 아니라 **보고 있는 컴퓨터**를 따릅니다. 맥 서버를 Windows에서 다루든 Windows 서버를 맥에서 다루든 손에 익은 키를 그대로 씁니다.
-  - 공통: Shift+Enter는 Claude Code·Codex의 줄바꿈, Alt(⌥)+←/→는 단어 이동, Alt(⌥)+⌫는 단어 지우기입니다.
+  - 공통: Shift+Enter는 Claude Code·Codex의 줄바꿈, Alt(⌥)+←/→는 단어 이동, Alt(⌥)+⌫는 단어 지우기입니다. 한글을 치다가 바로 누른 Ctrl+키도 그대로 갑니다(Claude Code가 일하는 중에 Ctrl+X → Ctrl+S로 메시지 바로 보내기 등).
   - 맥: 맥 터미널처럼 ⌘←/⌘→는 줄 처음·끝, ⌘⌫는 줄 지우기, ⌘K는 이 화면의 스크롤 기록 지우기입니다.
   - Windows·Linux: VS Code 터미널처럼 Ctrl+Backspace는 단어 지우기입니다.
 

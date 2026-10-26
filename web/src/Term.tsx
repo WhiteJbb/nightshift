@@ -31,6 +31,8 @@ const FLING_DECAY = 0.996;
 const FLING_STOP = 0.03;
 /** 터치로 이만큼(ms) 움직이지 않고 누르고 있으면 글자 고르기 */
 const LONG_PRESS_MS = 500;
+/** 한글 조합 중에 누른 Ctrl+글자: 조합이 이만큼(ms) 안에 끝나지 않으면 혼자 보낸다 */
+const IME_CTRL_MS = 100;
 /**
  * 클립보드에 쓴다. 이 서버는 보통 http(비보안 출처)로 열려 navigator.clipboard 가 없으니
  * 숨긴 입력칸을 골라 execCommand('copy') 로 쓴다 (클릭 직후라 브라우저가 허용한다).
@@ -208,6 +210,9 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
     let sending = false;
     let closed = false; // 탭·pane 을 바꾼 뒤에는 남은 입력을 이전 pane 으로 보내지 않는다
     let failures = 0;
+    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 xterm 이 확정된 글을 보낸 바로 뒤에 보낸다
+    let afterCompose: string | null = null;
+    let afterComposeTimer: ReturnType<typeof setTimeout> | undefined;
     const flush = async () => {
       if (closed || sending || queue === '') return;
       sending = true;
@@ -217,8 +222,10 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         for (let i = 0; i < bytes.length && !closed; i += RAW_CHUNK) await api.sendRaw(projectId, { pane, data: encode(bytes.subarray(i, i + RAW_CHUNK)) });
       } catch (e) {
         // 일부가 갔을 수도 있다. 뒤에 쌓인 입력(Enter 등)까지 이어 보내면 반쪽 명령이 실행될 수 있으니 버리고 알린다
-        // (붙여넣는 중에 모아 둔 키도 버린다)
+        // (붙여넣는 중에 모아 둔 키, 조합이 끝나길 기다리던 제어 문자도 버린다)
         queue = '';
+        clearTimeout(afterComposeTimer);
+        afterCompose = null;
         failures++;
         cb.current.onNotice?.(`입력을 보내지 못했습니다 (${errorMessage(e)}). 화면을 확인한 뒤 다시 입력하세요`);
         sending = false;
@@ -245,6 +252,23 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         void flush();
       });
     };
+    // 조합이 끝나(compositionend) xterm 이 확정된 글을 보내기 전까지 (xterm 은 textarea 에서 읽어 setTimeout 0 뒤에 보낸다)
+    let delivering = false;
+    const sendAfterCompose = () => {
+      clearTimeout(afterComposeTimer);
+      if (afterCompose !== null) send(afterCompose);
+      afterCompose = null;
+    };
+    const onCompositionEnd = () => {
+      delivering = true;
+      // xterm 보다 나중에 등록한 리스너라 이 타이머는 xterm 이 글을 보낸 뒤에 돈다.
+      // ponytail: 그 사이(같은 몇 ms)에 다음 키를 누르면 그 키가 먼저 간다. 사람이 누르는 빠르기로는 생기지 않는다
+      setTimeout(() => {
+        delivering = false;
+        sendAfterCompose();
+      }, 0);
+    };
+    term.textarea?.addEventListener('compositionend', onCompositionEnd);
     const input = term.onData((d) => {
       if (!canInput) return; // disableStdin 이면 오지 않지만, 보기 전용 프로젝트의 바이트는 어떤 경우에도 보내지 않는다
       // 버튼을 누르지 않은 채 움직인 보고(SGR 버튼 코드 35·51·67…)는 버린다. 마우스를 스칠 때마다 요청이 나가지 않게
@@ -337,6 +361,23 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         ev.preventDefault();
         return false;
       }
+      // 한글 등 IME 가 켜진 채 누른 Ctrl+글자는 keyCode 229 로 와서 xterm 이 버린다(조합 중이었으면 조합만 끝난다). 그러면 Claude Code 의
+      // Ctrl+X → Ctrl+S(작업 중 바로 보내기)가 첫 키를 잃고, 홀로 간 Ctrl+S 는 입력을 치워 버린다(stash). 제어 문자를 직접 보낸다:
+      // 조합 중이거나 확정된 글이 아직 안 나갔으면 그 글 뒤에 보낸다
+      if (ev.keyCode === 229 && mods === 'ctrl' && /^Key[A-Z]$/.test(ev.code)) {
+        if (ev.type === 'keydown' && canInput) {
+          const byte = String.fromCharCode(ev.code.charCodeAt(3) - 64);
+          if (afterCompose !== null) afterCompose += byte;
+          else if (ev.isComposing || delivering) {
+            afterCompose = byte;
+            // 이 키로 조합이 끝나지 않으면(compositionend 가 안 오면) 잠시 뒤 혼자 보낸다
+            afterComposeTimer = setTimeout(sendAfterCompose, IME_CTRL_MS);
+          } else send(byte);
+        }
+        return false;
+      }
+      // 조합이 끝나지 않은 채 다른 키를 누르면 기다리던 것을 이 키 앞에 보낸다
+      if (ev.type === 'keydown' && afterCompose !== null && !delivering && !ev.isComposing) sendAfterCompose();
       const combo = `${mods}+${ev.key}`;
       if (combo === 'meta+k') {
         if (ev.type === 'keydown') term.clear();
@@ -510,6 +551,8 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       el.removeEventListener('touchcancel', cancelPress);
       stopFling();
       cancelPress();
+      clearTimeout(afterComposeTimer);
+      term.textarea?.removeEventListener('compositionend', onCompositionEnd);
       settle();
       ro?.disconnect();
       window.removeEventListener('resize', fitFont);

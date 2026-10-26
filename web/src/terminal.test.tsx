@@ -32,6 +32,7 @@ const { FakeTerminal } = vi.hoisted(() => {
       this.key = h;
     }
     focus() {}
+    textarea = document.createElement('textarea');
     /** 마우스로 고른 글 */
     selection = '';
     hasSelection() {
@@ -337,6 +338,77 @@ test('on Windows/Linux, Ctrl+Backspace deletes a word (^W) while Ctrl+←/→ st
   expect(posts().map(([, body]) => atob(body.data!)).join('')).toBe('\x17\x1bb');
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'ArrowLeft', ctrlKey: true }))).toBe(true);
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true }))).toBe(true);
+});
+
+/** IME 가 받은 Ctrl+글자 (keyCode 229, xterm 은 버린다) */
+function imeKey(code: string, isComposing = true) {
+  const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true, isComposing });
+  Object.defineProperty(ev, 'keyCode', { value: 229 });
+  return ev;
+}
+/** 조합이 끝나 data 가 확정됐다 */
+const compositionEnd = (data: string) => act(() => void xterm().textarea.dispatchEvent(new CompositionEvent('compositionend', { data })));
+const sentText = () => posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0))));
+
+test('a Ctrl+letter pressed while composing Korean (keyCode 229, dropped by xterm) goes right after xterm sends the composed text', async () => {
+  await renderTab(project(ONE));
+  await init();
+  // 조합 중 Ctrl+X → 조합이 끝나면 xterm 이 확정된 글을 보내고(setTimeout 0, 여기선 그 자리에서 친다) 그 뒤에 ^X. 이어 누른 Ctrl+S 는 그다음
+  let handled = true;
+  act(() => void (handled = xterm().key!(imeKey('KeyX'))));
+  expect(handled).toBe(false);
+  await tick();
+  expect(posts()).toEqual([]);
+  compositionEnd('내');
+  act(() => xterm().type('\x1b[<0;3;4M'));
+  act(() => xterm().type('내'));
+  await tick();
+  act(() => xterm().type('\x13'));
+  await tick(150);
+  expect(sentText().join('')).toBe('\x1b[<0;3;4M내\x18\x13');
+});
+
+test('a Ctrl+letter with the IME on also waits when composition ended first, goes at once when nothing is composing, and keeps order across two keys', async () => {
+  await renderTab(project(ONE));
+  await init();
+  // 조합 끝이 키보다 먼저 와도(isComposing 은 이미 false) xterm 이 아직 안 보낸 글 뒤에 간다. 윈도우 IME 처럼 다음 키도 229 면 그 뒤에
+  compositionEnd('끝');
+  act(() => void xterm().key!(imeKey('KeyX', false)));
+  act(() => void xterm().key!(imeKey('KeyS', false)));
+  act(() => xterm().type('끝'));
+  await tick(150);
+  expect(sentText().join('')).toBe('끝\x18\x13');
+  // 조합 중이 아니면 바로
+  act(() => void xterm().key!(imeKey('KeyD', false)));
+  await tick();
+  expect(sentText().at(-1)).toBe('\x04');
+  // 조합이 끝나지 않으면 잠시 뒤 혼자, 그 전에 다른 키를 누르면 그 키 앞에
+  act(() => void xterm().key!(imeKey('KeyU')));
+  await tick(150);
+  expect(sentText().at(-1)).toBe('\x15');
+  act(() => void xterm().key!(imeKey('KeyW')));
+  act(() => void xterm().key!(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' })));
+  act(() => xterm().type('a'));
+  await tick(150);
+  expect(sentText().join('').endsWith('\x17a')).toBe(true);
+});
+
+test('a control key waiting for the composed text is dropped when sending that text fails', async () => {
+  fetchMock.mockImplementation(async () => json(503, { error: 'down' }));
+  await renderTab(project(ONE));
+  await init();
+  act(() => void xterm().key!(imeKey('KeyD')));
+  compositionEnd('내');
+  act(() => xterm().type('내'));
+  await tick(150);
+  // ^D 가 앞 글 없이 따로 가지 않는다
+  expect(sentText()).toEqual(['내']);
+  expect(screen.getByText(/입력을 보내지 못했습니다/)).toBeTruthy();
+  // 조합이 끝나길 기다리는 동안 앞 입력이 실패해도 (잠시 뒤 혼자 보내지 않고) 버린다
+  act(() => xterm().type('ls'));
+  act(() => void xterm().key!(imeKey('KeyD')));
+  await tick(150);
+  expect(sentText()).toEqual(['내', 'ls']);
 });
 
 test('Ctrl+V on a Mac reads an image from this browser\'s clipboard, uploads it and pastes the path; without one it sends ^V; keys typed meanwhile follow', async () => {
