@@ -31,7 +31,7 @@ const FLING_DECAY = 0.996;
 const FLING_STOP = 0.03;
 /** 터치로 이만큼(ms) 움직이지 않고 누르고 있으면 글자 고르기 */
 const LONG_PRESS_MS = 500;
-/** 한글 조합 중에 누른 Ctrl+글자를 이만큼(ms) 뒤에 보낸다. 조합된 글(xterm 이 setTimeout 0 으로 보낸다)이 먼저 가게 */
+/** 한글 조합 중에 누른 Ctrl+글자: 조합이 빈 글로 끝나 붙일 글이 이만큼(ms) 안에 안 오면 혼자 보낸다 */
 const IME_CTRL_MS = 30;
 /**
  * 클립보드에 쓴다. 이 서버는 보통 http(비보안 출처)로 열려 navigator.clipboard 가 없으니
@@ -247,12 +247,25 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         void flush();
       });
     };
+    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 xterm 이 보내는 글에 붙여 함께 보낸다:
+    // 순서가 지켜지고, 보내다 실패하면 같이 버려진다
+    let afterCompose: string | null = null;
+    let afterComposeCode = '';
+    let afterComposeTimer: ReturnType<typeof setTimeout> | undefined;
+    const dropAfterCompose = () => {
+      clearTimeout(afterComposeTimer);
+      afterCompose = null;
+    };
     const input = term.onData((d) => {
       if (!canInput) return; // disableStdin 이면 오지 않지만, 보기 전용 프로젝트의 바이트는 어떤 경우에도 보내지 않는다
       // 버튼을 누르지 않은 채 움직인 보고(SGR 버튼 코드 35·51·67…)는 버린다. 마우스를 스칠 때마다 요청이 나가지 않게
       d = d.replace(MOTION_RE, '');
       if (pasteOnRightClick) d = d.replace(RIGHT_BUTTON_RE, '');
       if (d === '') return;
+      if (afterCompose !== null) {
+        d += afterCompose;
+        dropAfterCompose();
+      }
       send(d);
     });
 
@@ -315,8 +328,6 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       'alt+Backspace': '\x1b\x7f',
       ...(mac ? { 'meta+ArrowLeft': '\x01', 'meta+ArrowRight': '\x05', 'meta+Backspace': '\x15' } : { 'ctrl+Backspace': '\x17' }),
     };
-    let imeCtrl: ReturnType<typeof setTimeout> | undefined;
-    let imeCtrlCode: string | null = null;
     term.attachCustomKeyEventHandler((ev) => {
       const mods = [ev.metaKey && 'meta', ev.ctrlKey && 'ctrl', ev.altKey && 'alt', ev.shiftKey && 'shift'].filter(Boolean).join('+');
       // 복사: ⌘C(맥)는 브라우저가 한다. Windows·Linux 터미널처럼 Ctrl+Shift+C 와, 고른 글이 있을 때의 Ctrl+C 도 복사한다.
@@ -341,26 +352,28 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         ev.preventDefault();
         return false;
       }
-      // 한글 등을 조합하는 중에 누른 Ctrl+글자는 keyCode 229 로 와서 xterm 이 버리고 조합만 끝난다. 그러면 Claude Code 의
-      // Ctrl+X → Ctrl+S(작업 중 바로 보내기)가 첫 키를 잃고, 홀로 간 Ctrl+S 는 입력을 치워 버린다(stash).
-      // 조합된 글이 간 뒤에 그 제어 문자를 보낸다
+      // 한글 등 IME 가 켜진 채 누른 Ctrl+글자는 keyCode 229 로 와서 xterm 이 버린다(조합 중이었으면 조합만 끝난다). 그러면 Claude Code 의
+      // Ctrl+X → Ctrl+S(작업 중 바로 보내기)가 첫 키를 잃고, 홀로 간 Ctrl+S 는 입력을 치워 버린다(stash). 제어 문자를 직접 보낸다:
+      // 조합 중이었으면 조합이 끝나 확정된 글 뒤에 붙인다. 다음 키를 누르면 xterm 이 그 글을 먼저 보내므로 순서가 지켜진다
       if (ev.keyCode === 229 && mods === 'ctrl' && /^Key[A-Z]$/.test(ev.code)) {
         if (ev.type === 'keydown' && canInput) {
-          clearTimeout(imeCtrl);
-          const code = ev.code;
-          imeCtrlCode = code;
-          imeCtrl = setTimeout(() => {
-            imeCtrlCode = null;
-            send(String.fromCharCode(code.charCodeAt(3) - 64));
-          }, IME_CTRL_MS);
+          const byte = String.fromCharCode(ev.code.charCodeAt(3) - 64);
+          dropAfterCompose();
+          if (!ev.isComposing) send(byte);
+          else {
+            afterCompose = byte;
+            afterComposeCode = ev.code;
+            // ponytail: 조합이 빈 글로 끝나면 붙일 글이 없어 잠시 뒤 혼자 보낸다. 그 사이(30ms)에 친 키보다는 늦게 간다
+            afterComposeTimer = setTimeout(() => {
+              if (afterCompose !== null) send(afterCompose);
+              afterCompose = null;
+            }, IME_CTRL_MS);
+          }
         }
         return false;
       }
-      // 조합을 끝낸 브라우저가 같은 키를 보통 키로 다시 보내면 미뤄 둔 것은 버리고 xterm 에 맡긴다 (두 번 가지 않게)
-      if (ev.type === 'keydown' && ev.code === imeCtrlCode && mods === 'ctrl') {
-        clearTimeout(imeCtrl);
-        imeCtrlCode = null;
-      }
+      // 조합을 끝낸 브라우저가 같은 키를 보통 키로 다시 보내면 xterm 이 보내므로 붙여 두었던 것은 버린다 (두 번 가지 않게)
+      if (ev.type === 'keydown' && afterCompose !== null && ev.code === afterComposeCode && mods === 'ctrl') dropAfterCompose();
       const combo = `${mods}+${ev.key}`;
       if (combo === 'meta+k') {
         if (ev.type === 'keydown') term.clear();
@@ -534,7 +547,7 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       el.removeEventListener('touchcancel', cancelPress);
       stopFling();
       cancelPress();
-      clearTimeout(imeCtrl);
+      dropAfterCompose();
       settle();
       ro?.disconnect();
       window.removeEventListener('resize', fitFont);

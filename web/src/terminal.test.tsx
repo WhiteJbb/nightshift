@@ -339,28 +339,54 @@ test('on Windows/Linux, Ctrl+Backspace deletes a word (^W) while Ctrl+←/→ st
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true }))).toBe(true);
 });
 
-test('a Ctrl+letter pressed while composing Korean (keyCode 229, dropped by xterm) goes after the composed text, once', async () => {
+test('a Ctrl+letter pressed with the IME on (keyCode 229, dropped by xterm) still goes: right after the composed text, alone when nothing was composing, never twice', async () => {
   fetchMock.mockResolvedValue(json(200, { ok: true }));
   await renderTab(project(ONE));
   await init();
-  const composing = (code: string) => {
-    const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true });
+  const ime = (code: string, isComposing = true) => {
+    const ev = new KeyboardEvent('keydown', { key: 'Process', code, ctrlKey: true, isComposing });
     Object.defineProperty(ev, 'keyCode', { value: 229 });
     return ev;
   };
-  // 조합 중 Ctrl+X: xterm 에 넘기지 않고, 조합이 끝나 확정된 '내' 가 먼저 간 뒤 ^X 를 보낸다
+  const sent = () => posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0))));
+  // 조합 중 Ctrl+X: 조합이 끝나 확정된 '내' 와 한 요청으로, 그 뒤에 ^X. 이어 누른 Ctrl+S 는 그다음 (xterm 이 보낸다)
   let handled = true;
-  act(() => void (handled = xterm().key!(composing('KeyX'))));
+  act(() => void (handled = xterm().key!(ime('KeyX'))));
   expect(handled).toBe(false);
   act(() => xterm().type('내'));
+  await tick();
+  act(() => xterm().type('\x13'));
   await tick(50);
-  expect(posts().map(([, body]) => new TextDecoder().decode(Uint8Array.from(atob(body.data!), (c) => c.charCodeAt(0)))).join('')).toBe('내\x18');
-  // 브라우저가 조합을 끝내고 같은 키를 보통 키로 다시 보내면 그쪽(xterm)에만 맡겨 두 번 가지 않는다
+  expect(sent()).toEqual(['내\x18', '\x13']);
+  // 조합 중이 아니었으면(윈도우 IME) 바로
+  act(() => void xterm().key!(ime('KeyX', false)));
+  await tick();
+  expect(sent().at(-1)).toBe('\x18');
+  // 조합이 빈 글로 끝나면 잠시 뒤 혼자
+  act(() => void xterm().key!(ime('KeyD')));
+  await tick(50);
+  expect(sent().at(-1)).toBe('\x04');
+  // 브라우저가 같은 키를 보통 키로 다시 보내면 xterm 에만 맡긴다
   const before = posts().length;
-  act(() => void xterm().key!(composing('KeyC')));
+  act(() => void xterm().key!(ime('KeyC')));
   expect(xterm().key!(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true }))).toBe(true);
+  act(() => xterm().type('내'));
   await tick(50);
-  expect(posts()).toHaveLength(before);
+  expect(sent().slice(before)).toEqual(['내']);
+});
+
+test('a control key waiting for the composed text is dropped with it when sending fails', async () => {
+  fetchMock.mockImplementation(async () => json(503, { error: 'down' }));
+  await renderTab(project(ONE));
+  await init();
+  const ev = new KeyboardEvent('keydown', { key: 'Process', code: 'KeyD', ctrlKey: true, isComposing: true });
+  Object.defineProperty(ev, 'keyCode', { value: 229 });
+  act(() => void xterm().key!(ev));
+  act(() => xterm().type('내'));
+  await tick(50);
+  // 한 요청으로 함께 실패했다. ^D 가 따로 가지 않는다
+  expect(posts().map(([, body]) => atob(body.data!))).toHaveLength(1);
+  expect(screen.getByText(/입력을 보내지 못했습니다/)).toBeTruthy();
 });
 
 test('Ctrl+V on a Mac reads an image from this browser\'s clipboard, uploads it and pastes the path; without one it sends ^V; keys typed meanwhile follow', async () => {
