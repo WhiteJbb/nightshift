@@ -188,6 +188,22 @@ describe('Monitor', () => {
     expect(await tick(43, ['the end', 'and one more line', ...bottom.slice(2)])).toBe('busy');
   });
 
+  it('at phone width, monitoring that starts while Claude Code is scrolled up does not see the return to the bottom as work', async () => {
+    let now = T0;
+    const foot = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    const state = { lines: ['history 20', 'more  Jump to bottom (click) ↓', ...foot] };
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: [{ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 43, lines: state.lines }], waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    await m.tick();
+    state.lines = ['the end', '✻ Sautéed for 5s · done 12:20 AM', ...foot];
+    for (let i = 0; i < 3; i++) {
+      now += 5000;
+      await m.tick();
+      expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
+    }
+  });
+
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {
     let now = T0;
     // 쉬는 Claude 인데 하단 줄 항목("1 feedback draft" 등)이 빠져 구분점이 남은 화면
