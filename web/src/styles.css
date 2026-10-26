@@ -2058,10 +2058,14 @@ fieldset.checks legend {
   .panes {
     gap: 8px;
   }
-  /* 휴대폰: 덜 쓰는 키와 "입력만 하기"는 "더보기"를 펼쳤을 때만 */
+  /* 휴대폰: 덜 쓰는 키와 "입력만 하기"(지금 보내기가 있으면 "이미지"도)는 "더보기"를 펼쳤을 때만 */
   .keys:not(.open) .extra,
-  .input-bar:not(:has(.keys.open)) .type-only {
+  .input-bar:not(:has(.keys.open)) .more-only {
     display: none;
+  }
+  /* 펼친 버튼이 입력칸을 짓누르지 않고 다음 줄로 내려가게 */
+  .input-row textarea {
+    min-width: 45%;
   }
   .keys .more {
     display: inline-block;

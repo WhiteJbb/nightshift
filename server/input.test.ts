@@ -29,6 +29,8 @@ describe('parseInput', () => {
     expect(parseInput({ pane: '%3', text: '-rf; $(x)' })).toEqual({ pane: '%3', text: '-rf; $(x)', enter: false });
     expect(parseInput({ pane: '%3', key: 'C-c' })).toEqual({ pane: '%3', key: 'C-c' });
     expect(parseInput({ pane: '%3', key: 'PPage' })).toEqual({ pane: '%3', key: 'PPage' });
+    expect(parseInput({ pane: '%3', text: 'x', now: true })).toEqual({ pane: '%3', text: 'x', enter: false, now: true });
+    expect(parseInput({ pane: '%3', text: 'x', now: 'yes' })).toEqual({ pane: '%3', text: 'x', enter: false });
   });
 
   it('rejects everything else', () => {
@@ -47,6 +49,13 @@ describe('sendInput', () => {
       ['tmux', ['send-keys', '-t', '%3', '-l', '--', '-l Enter; rm -rf ~']],
       ['tmux', ['send-keys', '-t', '%3', 'Enter']],
     ]);
+  });
+
+  it("sends text, then Claude Code's send-now chord (Ctrl+X Ctrl+S) after the same pause", async () => {
+    const t0 = Date.now();
+    expect(await sendInput({ pane: '%3', text: 'also add tests', enter: false, now: true })).toBeNull();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(ENTER_DELAY_MS - 5);
+    expect(mockRun.mock.calls.map((c) => c[1])).toEqual([['send-keys', '-t', '%3', '-l', '--', 'also add tests'], ['send-keys', '-t', '%3', 'C-x', 'C-s']]);
   });
 
   it('sends a key, and text without Enter', async () => {

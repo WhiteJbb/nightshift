@@ -282,6 +282,8 @@ const progName = (x: TmuxPane) => x.command.replace(/\.exe$/, '');
 /** targetNo: 보낼 곳으로 보여 줄 터미널 번호. pane 이 하나뿐이면 null (보낼 곳이 뻔하다) */
 function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pane: TmuxPane | null; targetNo: string | null }) {
   const showTarget = targetNo !== null;
+  // ponytail: 이름이 claude 인 pane 만 알아본다. npm 으로 깐 Claude Code 는 node 로 보여 "지금 보내기"가 없다
+  const claude = target !== null && progName(target) === 'claude';
   const pane = target?.id ?? '';
   const [text, setText] = useState('');
   const [moreKeys, setMoreKeys] = useState(false);
@@ -428,10 +430,19 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
         <button type="button" className="primary" disabled={blocked} onClick={() => sendText(true)}>
           보내기
         </button>
-        <button type="button" className="type-only" disabled={blocked || text === ''} title="Enter 를 누르지 않고 글만 pane 에 넣습니다 (아직 제출하지 않음)" onClick={() => sendText(false)}>
+        {/* Claude Code 는 일하는 중에 Enter 로 받은 글을 대기열에 두었다가 지금 일이 끝나면 읽는다. Ctrl+X → Ctrl+S(send now)는 바로 읽게 한다:
+            돌던 명령은 백그라운드로 옮기고 같은 턴에 읽고, 답만 쓰던 중이면 그 답을 끊는다. 쉬는 중이면 그냥 보낸다.
+            휴대폰 화면 폭에선 일하는 중 표시가 잘려 안 보여서, 일하는 동안만 띄우지 않고 늘 둔다 */}
+        {claude && (
+          <button type="button" disabled={blocked || text === ''} title="일하는 중에도 기다리지 않고 바로 전달합니다 (Ctrl+X → Ctrl+S). 보내기는 지금 일이 끝난 뒤 전달합니다" onClick={() => send({ pane, text, now: true })}>
+            지금 보내기
+          </button>
+        )}
+        <button type="button" className="more-only" disabled={blocked || text === ''} title="Enter 를 누르지 않고 글만 pane 에 넣습니다 (아직 제출하지 않음)" onClick={() => sendText(false)}>
           입력만 하기
         </button>
-        <button type="button" disabled={uploading > 0} title="이미지를 골라 파일로 저장하고 경로를 입력에 넣습니다 (붙여넣기·끌어다 놓기도 됩니다)" onClick={() => fileRef.current?.click()}>
+        {/* 휴대폰 입력칸이 좁아지지 않게, 지금 보내기가 있으면 이미지는 "더보기" 뒤로 */}
+        <button type="button" className={claude ? 'more-only' : undefined} disabled={uploading > 0} title="이미지를 골라 파일로 저장하고 경로를 입력에 넣습니다 (붙여넣기·끌어다 놓기도 됩니다)" onClick={() => fileRef.current?.click()}>
           {uploading > 0 ? '이미지 올리는 중…' : '이미지'}
         </button>
         <input

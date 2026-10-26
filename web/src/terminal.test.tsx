@@ -832,6 +832,22 @@ test('"입력만 하기" omits enter and is disabled while empty', async () => {
   expect(posts().map(([, body]) => body)).toEqual([{ pane: '%12', text: 'y' }]);
 });
 
+test('"지금 보내기" is only for a Claude Code pane, sends the text with now, and is disabled while empty; 이미지 moves behind 더보기', async () => {
+  const view = await renderTab(project([{ ...ONE[0]!, command: 'claude.exe' }]));
+  expect(screen.getByRole('button', { name: '이미지' }).className).toBe('more-only');
+  const button = screen.getByRole<HTMLButtonElement>('button', { name: '지금 보내기' });
+  expect(button.disabled).toBe(true);
+  type('테스트도 추가해');
+  fireEvent.click(button);
+  await tick();
+  expect(posts().map(([, body]) => body)).toEqual([{ pane: '%12', text: '테스트도 추가해', now: true }]);
+  expect(box().value).toBe('');
+  view.unmount();
+  await renderTab(project([{ ...ONE[0]!, command: 'codex' }]));
+  expect(screen.queryByRole('button', { name: '지금 보내기' })).toBeNull();
+  expect(screen.getByRole('button', { name: '이미지' }).className).toBe('');
+});
+
 test('special-key buttons send { pane, key } to the selected pane; Ctrl+C asks first', async () => {
   await renderTab(project(TWO));
   fireEvent.click(screen.getByRole('button', { name: '0.1 zsh' }));
