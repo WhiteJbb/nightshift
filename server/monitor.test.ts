@@ -237,7 +237,7 @@ describe('Monitor', () => {
     // 화면 높이만 바뀌어 맨 위 줄이 잘리거나 드러나도 일이 아니다
     const screen = ['older 1', 'older 2', 'older 3', ...Array.from({ length: 8 }, (_, i) => `recent ${i}`)];
     for (let i = 0; i <= READY_TICKS; i++) await tick([claude(50, screen), shell]);
-    for (const n of [9, 10, 11]) expect(await tick([claude(50, screen.slice(-n)), shell])).toBe('ready');
+    for (const n of [9, 10, 11, 6, 3, 10]) expect(await tick([claude(50, screen.slice(-n)), shell])).toBe('ready');
     // 다른 pane 의 크기가 바뀌어도, 답을 쓰고 있는 Claude 는 계속 일하는 중이다
     const writing = ['a', 'a b', 'a b c', 'a b c d'];
     expect(await tick([claude(50, [...screen, writing[0]!]), shell])).toBe('busy');

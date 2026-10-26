@@ -391,7 +391,8 @@ export class Monitor {
       tr.sizeKey = sizeKey;
       if (tr.output !== null && text !== tr.output && tr.settle === 0) tr.outputChangedAt = nowIso;
       // 휴대폰 폭에서 작업 중 표시가 빠졌을 때 쓰는 pane 마다의 화면 변화. 다른 pane 의 출력·크기 변경이 섞이지 않게 pane 마다 따로 본다.
-      // 입력칸 바로 위 8줄만: 입력칸에 치는 글, 입력칸이 커지거나 화면 높이가 바뀌어 맨 위 줄이 밀리는 것은 작업이 아니다.
+      // 입력칸 바로 위 8줄만 보고, 입력칸에 치는 글은 뺀다. 한쪽이 다른 쪽의 끝부분이면(입력칸이 커지거나 화면 높이가 바뀌어
+      // 위쪽이 잘리거나 드러남) 새 출력이 아니다. 새 출력은 아래에 붙어 끝부분이 달라진다.
       // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다).
       // 폭이 바뀌면 줄이 다시 나뉘므로 기준을 버리고, 다시 그리는 동안은 비교하지 않는다
       const seen = Object.fromEntries(
@@ -406,7 +407,8 @@ export class Monitor {
       );
       const changedPane = (id: string) => {
         const [a, b] = [tr.seen?.[id]?.body, seen[id]!];
-        return a != null && b.body !== null && a !== b.body && b.quiet === 0;
+        const tailOf = (x: string, y: string) => x === y || x.endsWith(`\n${y}`);
+        return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
       };
       const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
