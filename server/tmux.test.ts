@@ -210,9 +210,8 @@ describe('pattern helpers', () => {
     // 하단 줄이 다 들어가 있으면(쉬는 중) 화면이 바뀌어도(입력·스크롤) 일하는 게 아니다
     expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
     expect(isBusy([...foot], [], true)).toBe(false);
-    // 입력칸에 친 글이 스피너처럼 생겨도, 위로 올려 보는 중에 화면이 바뀌어도 일이 아니다
+    // 입력칸에 친 글이 스피너처럼 생겨도 일이 아니다
     expect(isBusy(['answer', '─────', '❯ look at this:', '  ✢ Nesting… (2s)', ...foot], p)).toBe(false);
-    expect(isBusy(['  steel of the rail beneath her palm and', '  the sal Jump to bottom (click) ↓ he went', '─────', ...foot], p, true)).toBe(false);
     // Claude Code 하단 줄이 아닌, 구분점으로 끝나는 셸 출력은 아니다
     expect(isBusy(['$ make', 'step 1 ·'], p, true)).toBe(false);
   });

@@ -178,6 +178,14 @@ describe('Monitor', () => {
     const tall = (prompt: string[]) => [...history, ...typing('').slice(0, 3), ...prompt, ...typing('').slice(4)].slice(-100);
     for (let i = 0; i <= READY_TICKS; i++) await tick(43, tall(['❯ ']));
     for (const prompt of [['❯ first line'], ['❯ first line', '  second'], ['❯ first line', '  second', '  third']]) expect(await tick(43, tall(prompt))).toBe('ready');
+    // 지난 대화를 위로 올려 보고(화면이 계속 바뀐다) 맨 아래로 돌아와도 일이 아니다
+    const bottom = typing('❯ ');
+    for (let i = 0; i <= READY_TICKS; i++) await tick(43, bottom);
+    for (const top of ['history 40', 'history 30', 'history 20']) expect(await tick(43, [top, 'more  Jump to bottom (click) ↓', ...bottom.slice(2)])).toBe('ready');
+    expect(await tick(43, bottom)).toBe('ready');
+    // 올려 보는 사이에 답이 더 써졌으면, 돌아왔을 때 달라져 있으니 일한 것이다
+    await tick(43, ['history 40', 'more  Jump to bottom (click) ↓', ...bottom.slice(2)]);
+    expect(await tick(43, ['the end', 'and one more line', ...bottom.slice(2)])).toBe('busy');
   });
 
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {

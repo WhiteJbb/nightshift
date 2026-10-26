@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, stripAnsi, stripVolatile } from './logs.ts';
+import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -373,9 +373,10 @@ export class Monitor {
       const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
       const text = norm(plain.map((lines) => lines.join('\n')).join('\f'));
       // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다.
-      // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다
-      const bodies = plain.map((lines) => norm(aboveInput(lines).slice(-20).join('\n')));
+      // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다.
+      // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다)
       const prev = tr.bodies;
+      const bodies = plain.map((lines, i) => (scrolledUp(lines) && prev?.length === plain.length ? prev[i]! : norm(aboveInput(lines).slice(-20).join('\n'))));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
         waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
