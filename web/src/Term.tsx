@@ -210,6 +210,9 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
     let sending = false;
     let closed = false; // 탭·pane 을 바꾼 뒤에는 남은 입력을 이전 pane 으로 보내지 않는다
     let failures = 0;
+    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 xterm 이 확정된 글을 보낸 바로 뒤에 보낸다
+    let afterCompose: string | null = null;
+    let afterComposeTimer: ReturnType<typeof setTimeout> | undefined;
     const flush = async () => {
       if (closed || sending || queue === '') return;
       sending = true;
@@ -219,8 +222,10 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         for (let i = 0; i < bytes.length && !closed; i += RAW_CHUNK) await api.sendRaw(projectId, { pane, data: encode(bytes.subarray(i, i + RAW_CHUNK)) });
       } catch (e) {
         // 일부가 갔을 수도 있다. 뒤에 쌓인 입력(Enter 등)까지 이어 보내면 반쪽 명령이 실행될 수 있으니 버리고 알린다
-        // (붙여넣는 중에 모아 둔 키도 버린다)
+        // (붙여넣는 중에 모아 둔 키, 조합이 끝나길 기다리던 제어 문자도 버린다)
         queue = '';
+        clearTimeout(afterComposeTimer);
+        afterCompose = null;
         failures++;
         cb.current.onNotice?.(`입력을 보내지 못했습니다 (${errorMessage(e)}). 화면을 확인한 뒤 다시 입력하세요`);
         sending = false;
@@ -247,9 +252,6 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
         void flush();
       });
     };
-    // 한글 조합 중에 누른 Ctrl+글자의 제어 문자 (아래 키 처리). 조합이 끝나 xterm 이 확정된 글을 보낸 바로 뒤에 보낸다
-    let afterCompose: string | null = null;
-    let afterComposeTimer: ReturnType<typeof setTimeout> | undefined;
     // 조합이 끝나(compositionend) xterm 이 확정된 글을 보내기 전까지 (xterm 은 textarea 에서 읽어 setTimeout 0 뒤에 보낸다)
     let delivering = false;
     const sendAfterCompose = () => {
@@ -259,13 +261,10 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
     };
     const onCompositionEnd = () => {
       delivering = true;
-      const before = failures;
       // xterm 보다 나중에 등록한 리스너라 이 타이머는 xterm 이 글을 보낸 뒤에 돈다.
       // ponytail: 그 사이(같은 몇 ms)에 다음 키를 누르면 그 키가 먼저 간다. 사람이 누르는 빠르기로는 생기지 않는다
       setTimeout(() => {
         delivering = false;
-        // 확정된 글을 보내지 못했으면 버린다 (Ctrl+D 따위가 앞 글 없이 가지 않게)
-        if (failures !== before) afterCompose = null;
         sendAfterCompose();
       }, 0);
     };

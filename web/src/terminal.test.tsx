@@ -404,6 +404,11 @@ test('a control key waiting for the composed text is dropped when sending that t
   // ^D 가 앞 글 없이 따로 가지 않는다
   expect(sentText()).toEqual(['내']);
   expect(screen.getByText(/입력을 보내지 못했습니다/)).toBeTruthy();
+  // 조합이 끝나길 기다리는 동안 앞 입력이 실패해도 (잠시 뒤 혼자 보내지 않고) 버린다
+  act(() => xterm().type('ls'));
+  act(() => void xterm().key!(imeKey('KeyD')));
+  await tick(150);
+  expect(sentText()).toEqual(['내', 'ls']);
 });
 
 test('Ctrl+V on a Mac reads an image from this browser\'s clipboard, uploads it and pastes the path; without one it sends ^V; keys typed meanwhile follow', async () => {
