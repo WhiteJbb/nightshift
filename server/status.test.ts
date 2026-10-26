@@ -83,6 +83,9 @@ describe('judge', () => {
     // 표시가 떠 있으면 화면이 20분 그대로여도(긴 명령) 작업 중, 오래 그대로면 정지 의심
     expect(judge(input({ tmux: { ...tmux, agent: 'busy', lastOutputChangeAt: ago(20) }, lastGitChangeAt: ago(20) }))).toEqual({ state: 'running', reasons: ['에이전트 작업 중'] });
     expect(judge(input({ tmux: { ...tmux, agent: 'busy', lastOutputChangeAt: ago(50) }, lastGitChangeAt: ago(50) })).state).toBe('stalled');
+    // 백그라운드 에이전트·Monitor 를 기다리는 동안은 화면·Git 이 오래 그대로여도 멈춘 게 아니다
+    expect(judge(input({ tmux: { ...tmux, agent: 'waiting', lastOutputChangeAt: ago(50) }, lastGitChangeAt: ago(50) }))).toEqual({ state: 'running', reasons: ['백그라운드 작업(에이전트·Monitor)을 기다리는 중'] });
+    expect(judge(input({ tmux: { ...tmux, agent: 'waiting', waitingPrompt: 'Do you want to proceed?' } })).state).toBe('waiting');
     // 입력 대기가 먼저다
     expect(judge(input({ tmux: { ...tmux, agent: 'ready', waitingPrompt: 'Do you want to proceed?' } })).state).toBe('waiting');
   });
