@@ -34,8 +34,11 @@ const VOLATILE_RE = /[\d\u2800-\u28ff✢✳✶✻✽✺·∗*|/\\—-]/g;
 export const stripVolatile = (s: string): string => s.replace(VOLATILE_RE, '');
 
 const PROMPT_SCAN_LINES = 15;
-/** Claude Code 에서 지난 대화를 위로 올려 보는 중인지 (화면 아래쪽에 "Jump to bottom", 그사이 새 글이 왔으면 "2 new messages" 가 뜬다) */
-export const scrolledUp = (lines: string[]): boolean => aboveInput(lines.filter((l) => l.trim() !== '')).slice(-3).some((l) => /Jump to bottom|\b\d+ new messages?\b/.test(l));
+// Claude Code 가 지난 대화를 올려 볼 때 화면 아래에 띄우는 버튼: "Jump to bottom (click) ↓", 그사이 새 글이 왔으면 "2 new messages ↓",
+// 또는 "…: fn+↓ to scroll". 뒤에 붙는 ↓·"to scroll" 까지 맞춰, 답 본문의 같은 말과 구분한다
+const SCROLL_HINT_RE = /(?:Jump to bottom|\b\d+ new messages?)(?:(?: \([^)]*\))? ↓|: .+ to scroll)/;
+/** Claude Code 에서 지난 대화를 위로 올려 보는 중인지 */
+export const scrolledUp = (lines: string[]): boolean => aboveInput(lines.filter((l) => l.trim() !== '')).slice(-3).some((l) => SCROLL_HINT_RE.test(l));
 /** Claude Code 입력칸(맨 아래 가로줄 둘 사이)부터 아래를 뺀 화면. 가로줄이 둘 없으면 그대로. 입력칸 테두리는 첫 칸부터 그어진다(입력칸 안에 친 줄은 들여 써진다) */
 export function aboveInput(lines: string[]): string[] {
   const rules = lines.flatMap((l, i) => (/^─{3,}\s*$/.test(l) ? [i] : []));

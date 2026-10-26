@@ -211,8 +211,11 @@ describe('pattern helpers', () => {
     expect(isBusy(['✢ Nesting… (2s)', '❯ 입력 중', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'], p, true)).toBe(false);
     expect(isBusy([...foot], [], true)).toBe(false);
     // 지난 대화를 올려 보는 중 (그사이 새 글이 오면 표시가 바뀐다)
-    for (const hint of ['Jump to bottom (click) ↓', '1 new message (click) ↓', '12 new messages (click) ↓']) expect(scrolledUp(['older', `  text ${hint}`, '─────', '❯ ', '─────', 'footer'])).toBe(true);
-    expect(scrolledUp(['older', 'latest', '─────', '❯ ', '─────', 'footer'])).toBe(false);
+    for (const hint of ['Jump to bottom (click) ↓', '1 new message (click) ↓', '12 new messages (ctrl+end) ↓', '3 new messages ↓', 'Jump to bottom: fn+↓ to scroll']) {
+      expect(scrolledUp(['older', `  text ${hint}`, '─────', '❯ ', '─────', 'footer'])).toBe(true);
+    }
+    // 답 본문의 같은 말은 버튼이 아니다
+    for (const text of ['latest', '  The inbox has 2 new messages.', '  Press Jump to bottom to go back']) expect(scrolledUp(['older', text, '─────', '❯ ', '─────', 'footer'])).toBe(false);
     // 입력칸 안에 친 가로줄은 테두리가 아니다 (입력칸 안의 줄은 들여 써진다)
     expect(aboveInput(['answer', '─────', '❯ notes', '  ─────', '  more', '─────', 'footer'])).toEqual(['answer']);
     // 입력칸에 친 글이 스피너처럼 생겨도 일이 아니다
