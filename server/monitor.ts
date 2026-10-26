@@ -372,8 +372,9 @@ export class Monitor {
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
       const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
       const text = norm(plain.map((lines) => lines.join('\n')).join('\f'));
-      // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다
-      const bodies = plain.map((lines) => norm(aboveInput(lines).join('\n')));
+      // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다.
+      // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다
+      const bodies = plain.map((lines) => norm(aboveInput(lines).slice(-20).join('\n')));
       const prev = tr.bodies;
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;

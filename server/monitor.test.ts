@@ -6,7 +6,7 @@ import type { GitInfo, Snapshot } from '../shared/types.ts';
 import { parseConfig } from './config.ts';
 import { demoCollector, demoConfig, seedDemoRuns } from './demo.ts';
 import type { Collector, RawTmux } from './monitor.ts';
-import { attachCommand, Monitor, NO_LOG } from './monitor.ts';
+import { attachCommand, Monitor, NO_LOG, READY_TICKS } from './monitor.ts';
 import { Runner } from './runner.ts';
 
 const T0 = Date.parse('2026-10-04T03:00:00Z');
@@ -173,6 +173,11 @@ describe('Monitor', () => {
     // 쉬는 중인데 하단 줄 다른 항목이 빠져 구분점이 남은 화면: 입력칸에 글을 쳐도(보내기 전) 일이 아니다
     const typing = (prompt: string) => ['the end', '✻ Sautéed for 5s · done 12:20 AM', '─────', prompt, '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
     for (const prompt of ['❯ ', '❯ please', '❯ please add', '❯ please add tests']) expect(await tick(43, typing(prompt))).toBe('ready');
+    // 캡처 줄 수(100)가 꽉 찬 화면에서 여러 줄로 쳐서 입력칸이 커지면 맨 위 줄이 밀려난다. 그것도 일이 아니다
+    const history = Array.from({ length: 100 }, (_, i) => `history ${i}`);
+    const tall = (prompt: string[]) => [...history, ...typing('').slice(0, 3), ...prompt, ...typing('').slice(4)].slice(-100);
+    for (let i = 0; i <= READY_TICKS; i++) await tick(43, tall(['❯ ']));
+    for (const prompt of [['❯ first line'], ['❯ first line', '  second'], ['❯ first line', '  second', '  third']]) expect(await tick(43, tall(prompt))).toBe('ready');
   });
 
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {
