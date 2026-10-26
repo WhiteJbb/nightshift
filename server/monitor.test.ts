@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitInfo, Snapshot } from '../shared/types.ts';
+import type { GitInfo, Snapshot, TmuxPane } from '../shared/types.ts';
 import { parseConfig } from './config.ts';
 import { demoCollector, demoConfig, seedDemoRuns } from './demo.ts';
 import type { Collector, RawTmux } from './monitor.ts';
@@ -202,6 +202,38 @@ describe('Monitor', () => {
       await m.tick();
       expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
     }
+  });
+
+  it('at phone width, switching panes keeps a writing Claude Code busy, and a resize while scrolled up is not work', async () => {
+    let now = T0;
+    const foot = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle) ·'];
+    const claude = (cols: number, lines: string[]) => ({ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols, lines: [...lines, ...foot] });
+    const shell = { id: '%2', window: 1, windowName: 'w', index: 0, command: 'zsh', active: false, cols: 43, lines: ['$ '] };
+    const state = { panes: [claude(43, ['the harbor'])] as TmuxPane[] };
+    state.panes.push(shell);
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: state.panes, waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    const tick = async (panes: TmuxPane[]) => {
+      now += 5000;
+      state.panes = panes;
+      await m.tick();
+      return m.snapshot.projects[0]!.tmux.agent;
+    };
+    await m.tick();
+    // 답을 써 내려가는 동안 다른 pane 을 골랐다 돌아온다 (활성 pane 이 앞으로): 계속 일하는 중
+    const words = ['the harbor was', 'the harbor was quiet', 'the harbor was quiet at', 'the harbor was quiet at dawn'];
+    expect(await tick([claude(43, [words[0]!]), shell])).toBe('busy');
+    expect(await tick([shell, claude(43, [words[1]!])])).toBe('busy');
+    expect(await tick([shell, claude(43, [words[2]!])])).toBe('busy');
+    expect(await tick([claude(43, [words[3]!]), shell])).toBe('busy');
+    // 다 쓰고 쉰다
+    const done = ['the end', '✻ Sautéed for 5s · done 12:20 AM'];
+    for (let i = 0; i <= READY_TICKS; i++) await tick([claude(43, done), shell]);
+    expect(m.snapshot.projects[0]!.tmux.agent).toBe('ready');
+    // 위로 올려 본 채 화면 폭이 바뀌고(다시 그림), 맨 아래로 돌아오면 줄이 다시 나뉘어 있다. 일이 아니다
+    for (const cols of [43, 50, 50, 50]) expect(await tick([claude(cols, ['history 3', 'more  Jump to bottom (click) ↓']), shell])).toBe('ready');
+    expect(await tick([claude(50, ['the end ✻ Sautéed for 5s · done 12:20 AM'.slice(0, 20), 'done 12:20 AM']), shell])).toBe('ready');
   });
 
   it("at phone width, another pane's output does not make an idle Claude Code pane look busy", async () => {

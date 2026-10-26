@@ -370,15 +370,11 @@ export class Monitor {
     if (raw.exists) {
       // 어느 pane 이든 출력이 바뀌면 활동이다. pane 정보가 없으면 활성 pane 출력만 본다.
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
-      const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
-      const text = norm(plain.map((lines) => lines.join('\n')).join('\f'));
-      // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다.
-      // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다.
-      // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다)
-      // pane 순서는 활성 pane 이 앞이라 바뀔 수 있어 id 로 맞춘다
       const ids = raw.panes.length ? raw.panes.map((x) => x.id) : [''];
-      const prev = tr.bodies ?? {};
-      const bodies = Object.fromEntries(plain.map((lines, i) => [ids[i]!, scrolledUp(lines) ? (prev[ids[i]!] ?? null) : norm(aboveInput(lines).slice(-20).join('\n'))]));
+      // pane 목록은 활성 pane 이 앞이라 다른 pane 을 고를 때마다 순서가 바뀐다. 비교하는 값(출력·크기)은 id 순으로 만든다
+      const byId = ids.map((id, i) => ({ id, i, cols: raw.panes[i]?.cols ?? 0 })).sort((a, b) => a.id.localeCompare(b.id));
+      const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
+      const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
         waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
@@ -387,10 +383,17 @@ export class Monitor {
         if (pane && options.length) waitingChoices = { pane: pane.id, options };
       });
       // 보는 화면에 맞춰 pane 크기를 바꾸면 프로그램이 화면을 다시 그린다. 그 변화로 "실행 중"이 되지 않게 잠시 무시한다
-      const sizeKey = raw.panes.map((x) => `${x.id}:${x.cols ?? 0}`).join(',');
-      if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
+      const sizeKey = raw.panes.length ? byId.map((x) => `${x.id}:${x.cols}`).join(',') : '';
+      const resized = tr.sizeKey !== null && sizeKey !== tr.sizeKey;
+      if (resized) tr.settle = RESIZE_SETTLE_TICKS;
       tr.sizeKey = sizeKey;
       if (tr.output !== null && text !== tr.output && tr.settle === 0) tr.outputChangedAt = nowIso;
+      // pane 마다 따로 본다 (다른 pane 의 출력이 이 pane 의 작업으로 보이지 않게). 입력칸에 치는 글도 작업이 아니다.
+      // 입력칸 바로 위 20줄만: 캡처는 줄 수가 정해져 있어, 입력칸이 커지면 맨 위 줄이 밀려나 바뀐 것처럼 보인다.
+      // 위로 올려 보는 동안은 기준을 그대로 둔다: 맨 아래로 돌아오면 올려 보기 전 화면과 비교한다 (그사이 일했으면 달라져 있다).
+      // 크기가 바뀌면 줄이 다시 나뉘므로 붙잡아 둔 기준도 버린다
+      const prev = resized ? {} : (tr.bodies ?? {});
+      const bodies = Object.fromEntries(plain.map((lines, i) => [ids[i]!, scrolledUp(lines) ? (prev[ids[i]!] ?? null) : norm(aboveInput(lines).slice(-20).join('\n'))]));
       const changedPane = (id: string) => prev[id] != null && bodies[id] != null && prev[id] !== bodies[id] && tr.settle === 0;
       const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
