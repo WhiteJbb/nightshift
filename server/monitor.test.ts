@@ -564,6 +564,26 @@ describe('followRepo to a folder beside the configured one', () => {
       output = ['• Edited ~/Downloads/과제 (2)/a.py (+1 -1)', `• Ran cat '${down}/과제 (2)/b.py'`, `  └ ${down}/과제(3)/보고서.pdf`];
       await m.tick();
       expect(where()).toBe(path.join(down, '과제 (2)'));
+
+      // 위로 올려 본 지난 화면과 입력칸에 친 글은 세지 않는다
+      const box = ['─'.repeat(20), `> cat '${down}/과제(3)/x'`, '─'.repeat(20), '  ⏵⏵ auto mode on'];
+      output = [`  └ ${down}/과제(3)/보고서.pdf`, `  └ ${down}/과제(3)/보고서.pdf`, '  Jump to bottom (click) ↓', ...box];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
+      output = ['⏺ 끝났어요', ...box];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
+
+      // 셸 pane 이 cd 로 옆 폴더에 갔다가 돌아오면 따라간다. 화면에 남은 옛 경로가 되돌리지 않는다
+      pane.cwd = path.join(down, '과제(3)');
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제(3)'));
+      output = [`  └ ${down}/과제(3)/보고서.pdf`];
+      pane.cwd = path.join(down, '과제 (2)');
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
     } finally {
       process.env.HOME = was;
       rmSync(home, { recursive: true });

@@ -145,6 +145,8 @@ export class Monitor {
   private tracked = new Map<string, Tracked>();
   /** 프로젝트마다 지난 tick 에 본, 에이전트가 돌리던 프로세스들과 그때의 저장소 (followRepo) */
   private workSeen = new Map<string, Map<number, string | null>>();
+  /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
+  private looked = new Map<string, { cwd: string | undefined; beside: string | undefined }>();
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -306,7 +308,9 @@ export class Monitor {
     const nearby = !fromHome && path.relative(up, home).startsWith('..');
     const sibling = (dir: string) => nearby && path.dirname(dir) === parent;
     let beside: string | undefined;
-    for (const name of nearby ? mentionedIn(raw.output, parent, homedir()) : []) {
+    // 위로 올려 본 지난 화면과 입력칸에 치는 중인 글은 일하는 곳이 아니다
+    const screen = scrolledUp(raw.output) ? [] : aboveInput(raw.output);
+    for (const name of nearby ? mentionedIn(screen, parent, homedir()) : []) {
       const dir = path.join(parent, name);
       if ((await stat(dir).catch(() => null))?.isDirectory()) {
         beside = dir;
@@ -316,16 +320,22 @@ export class Monitor {
     // 같은 저장소의 하위 폴더들은 맨 위로 모은다 (폴더마다 다른 프로젝트로 보면 추적 기록이 매번 새로 시작된다)
     const roots = new Map<string, string | null>();
     for (const dir of new Set([cwd, beside, followed, ...(procs ?? []).map((x) => x.dir)])) {
-      if (dir) roots.set(dir, (this.opts.collector.repoRoot ? await this.opts.collector.repoRoot(dir) : dir) ?? (sibling(dir) ? dir : null));
+      if (dir) roots.set(dir, this.opts.collector.repoRoot ? await this.opts.collector.repoRoot(dir) : dir);
     }
     const fresh = procs ? this.freshWork(p, procs, followed, (dir) => roots.get(dir) ?? null) : [];
+    // 옆 폴더는 pane 이 cd 로 옮겨 가거나 화면에 가장 많이 나온 옆 폴더가 바뀐 때만 본다: 옛 경로가 화면에 남아 있거나
+    // pane 이 에이전트를 띄운 폴더에 그대로 있어도, 그 뒤에 따라간 곳을 되돌리지 않는다. pane 이 저장소 안에 있으면 그 저장소다 (위와 같다)
+    const before = this.looked.get(p.id);
+    this.looked.set(p.id, { cwd, beside });
+    const inRepo = !!(cwd && roots.get(cwd));
+    const changed = inRepo ? [] : [before && cwd !== before.cwd ? cwd : undefined, beside !== before?.beside ? beside : undefined];
     const tried = new Set<string>();
-    for (const dir of new Set([cwd, beside, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
-      const root = dir ? roots.get(dir) : null;
+    for (const dir of new Set([...changed, inRepo ? cwd : undefined, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
+      const root = dir ? (roots.get(dir) ?? (sibling(dir) ? dir : null)) : null;
       if (!root || tried.has(root)) continue;
-      // 화면에 가장 많이 나온 옆 폴더가 등록한 폴더면 그리로 돌아온다
       if (root === p.repoPath) {
-        if (dir === beside) break;
+        // 등록한 폴더로 cd 했거나 그 폴더가 가장 많이 나오게 됐으면 돌아온다
+        if (changed.includes(dir)) break;
         continue;
       }
       tried.add(root);
