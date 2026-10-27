@@ -657,6 +657,9 @@ describe('off', () => {
     const state = (x = m) => x.snapshot.projects[0]!.status.state;
     await m.tick();
     m.setOff('app', true);
+    // 끄기 직전에 시작한 tick 은 세션이 아직 떠 있는 것을 본다. 그것으로 풀지 않는다
+    await m.tick();
+    expect(m.exportState().off).toEqual(['app']);
     exists = false;
     await m.tick();
     expect(state()).toBe('off');

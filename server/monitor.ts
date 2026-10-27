@@ -147,8 +147,11 @@ export class Monitor {
   private workSeen = new Map<string, Map<number, string | null>>();
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
   private looked = new Map<string, { cwd: string | null; beside: string | null }>();
-  /** 일부러 꺼 둔 프로젝트. 세션이 다시 뜨면 뺀다. 새 모니터링 세션(reset)으로도 풀리지 않는다 */
-  private off: Set<string>;
+  /**
+   * 일부러 꺼 둔 프로젝트 → 그 뒤 세션이 꺼진 것을 봤는지. 꺼진 것을 본 뒤 다시 뜨면 뺀다 (끄기 직전에 시작한 tick 이 본
+   * 옛 모습으로 풀지 않게). 새 모니터링 세션(reset)으로도 풀리지 않는다
+   */
+  private off: Map<string, boolean>;
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -162,7 +165,8 @@ export class Monitor {
     this.opts = opts;
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.restore?.startedAt ?? new Date(this.now()).toISOString();
-    this.off = new Set(opts.restore?.off ?? []);
+    // 저장된 것은 꺼진 것을 본 뒤다: 서버가 꺼진 사이 세션을 다시 켰으면 풀린다
+    this.off = new Map((opts.restore?.off ?? []).map((id) => [id, true]));
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
@@ -218,12 +222,12 @@ export class Monitor {
       const tr = this.tracked.get(p.id);
       if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
-    return { startedAt: this.startedAt, tracked, off: [...this.off] };
+    return { startedAt: this.startedAt, tracked, off: [...this.off.keys()] };
   }
 
   /** 세션을 꺼 둔 것으로 표시하거나 푼다 (세션 종료 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다) */
   setOff(projectId: string, on: boolean): void {
-    if (on) this.off.add(projectId);
+    if (on) this.off.set(projectId, false);
     else this.off.delete(projectId);
     this.publish();
   }
@@ -272,7 +276,7 @@ export class Monitor {
         this.looked.delete(id);
       }
     }
-    for (const id of this.off) if (!projects.some((p) => p.id === id)) this.off.delete(id);
+    for (const id of this.off.keys()) if (!projects.some((p) => p.id === id)) this.off.delete(id);
     let tmuxError: string | undefined;
     const tmuxAll = await collector.tmux(projects).catch((e: Error) => {
       tmuxError = `tmux 수집 실패: ${e.message}`;
@@ -396,7 +400,10 @@ export class Monitor {
 
   private async collectOne(config: ProjectConfig, raw: RawTmux, nowIso: string): Promise<Collected> {
     const { project: p, git } = await this.followRepo(config, raw);
-    if (raw.exists) this.off.delete(p.id);
+    if (this.off.has(p.id)) {
+      if (!raw.exists) this.off.set(p.id, true);
+      else if (this.off.get(p.id)) this.off.delete(p.id);
+    }
     let tr = this.tracked.get(p.id);
     if (!tr || tr.repoPath !== p.repoPath) this.tracked.set(p.id, (tr = newTracked(p.repoPath)));
 
