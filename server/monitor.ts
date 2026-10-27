@@ -305,7 +305,12 @@ export class Monitor {
     await Promise.all(
       projects.map(async (p) => {
         try {
-          this.collected.set(p.id, await this.collectOne(p, rawTmux(p), nowIso));
+          const c = await this.collectOne(p, rawTmux(p), nowIso);
+          // 꺼 둠은 새 수집 결과와 함께 바꾼다: 그 사이 publish(테스트 실행 상태 변화 등)가 옛 결과(세션 없음)와 풀린 표시로 오류를 알리지 않게
+          this.collected.set(p.id, c);
+          const off = this.off.get(p.id);
+          if (off && !c.tmux.exists) off.created = null;
+          else if (off && c.tmux.createdAt !== off.created) this.off.delete(p.id);
         } catch (e) {
           // 한 프로젝트의 수집 실패가 나머지를 막지 않게 오류 상태로 표시만 한다.
           this.collected.set(p.id, {
@@ -418,11 +423,6 @@ export class Monitor {
 
   private async collectOne(config: ProjectConfig, raw: RawTmux, nowIso: string): Promise<Collected> {
     const { project: p, git } = await this.followRepo(config, raw);
-    const off = this.off.get(p.id);
-    if (off) {
-      if (!raw.exists) off.created = null;
-      else if (raw.createdAt !== off.created) this.off.delete(p.id);
-    }
     let tr = this.tracked.get(p.id);
     if (!tr || tr.repoPath !== p.repoPath) this.tracked.set(p.id, (tr = newTracked(p.repoPath)));
 
