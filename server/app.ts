@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { constants, createGzip, gzipSync } from 'node:zlib';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import type { AgentKind, ConfigView, EditableProject, RawInputRequest, Snapshot, TermEvent } from '../shared/types.ts';
@@ -113,22 +117,66 @@ export interface AppDeps {
   };
 }
 
-/**
- * 5초마다 가는 실시간 스냅샷에서 큰 것을 뺀다: pane 화면 사본(터미널은 따로 스트림으로 받는다)과
- * 기준점 이후 커밋·파일 목록(Git 탭이 열 때 따로 받는다). 휴대폰에서 시간당 수십 MB 가 나가던 것을 줄인다.
- */
 /** 요청의 agent: 없으면 undefined, 정해진 에이전트가 아니면 null. `in` 은 constructor 같은 상속 이름도 통과시키므로 쓰지 않는다 */
 export const parseAgent = (v: unknown): AgentKind | undefined | null =>
   v === undefined || v === null ? undefined : typeof v === 'string' && Object.hasOwn(AGENT_COMMANDS, v) ? (v as AgentKind) : null;
 
+/** 실시간 스냅샷에 싣는 변경 파일 목록의 최대 길이. 커밋 안 한 결과물이 수천 개인 저장소도 있다 */
+export const STREAM_FILES = 300;
+
+/**
+ * 5초마다 가는 실시간 스냅샷에서 큰 것을 뺀다: pane 화면 사본(터미널은 따로 스트림으로 받는다),
+ * 기준점 이후 커밋·파일 목록과 넘치는 변경 파일 목록(Git·파일 탭이 열 때 따로 받는다), 서버만 쓰는 Git 지문. 휴대폰에서 시간당 수십 MB 가 나가던 것을 줄인다.
+ */
 export const slimSnapshot = (s: Snapshot): Snapshot => ({
   ...s,
-  projects: s.projects.map((p) => ({
-    ...p,
-    tmux: { ...p.tmux, panes: p.tmux.panes.map((x) => ({ ...x, lines: [] })), output: p.tmux.panes.length ? [] : p.tmux.output },
-    since: p.since && { ...p.since, commits: [], files: [], partial: true },
-  })),
+  projects: s.projects.map((p) => {
+    const cut = p.git.changedFiles.length > STREAM_FILES || p.git.diffStat.length > STREAM_FILES;
+    return {
+      ...p,
+      git: {
+        ...p.git,
+        fingerprint: '',
+        ...(cut && {
+          changedFiles: p.git.changedFiles.slice(0, STREAM_FILES),
+          diffStat: p.git.diffStat.slice(0, STREAM_FILES),
+          cut: { total: p.git.changedFiles.length, key: createHash('sha1').update(JSON.stringify([p.git.changedFiles, p.git.diffStat])).digest('base64url') },
+        }),
+      },
+      tmux: { ...p.tmux, panes: p.tmux.panes.map((x) => ({ ...x, lines: [] })), output: p.tmux.panes.length ? [] : p.tmux.output },
+      since: p.since && { ...p.since, commits: [], files: [], partial: true },
+    };
+  }),
 });
+
+const gzipOk = (req: Request) => req.acceptsEncodings('gzip') === 'gzip';
+
+/** 큰 JSON(스냅샷 수백 KB)은 받는 쪽이 받으면 gzip 으로 보낸다 */
+function sendJson(req: Request, res: Response, body: unknown): void {
+  const json = JSON.stringify(body);
+  res.vary('Accept-Encoding').type('json');
+  if (gzipOk(req)) res.set('Content-Encoding', 'gzip').send(gzipSync(json));
+  else res.send(json);
+}
+
+/**
+ * 빌드한 화면 파일. 이름에 해시가 붙은 /assets 는 내용이 바뀌지 않으므로 오래 캐시한다 (새 릴리즈는 index.html 이 새 이름을 가리키고,
+ * index.html 은 늘 다시 확인한다). 글로 된 것(js·css·svg)은 받는 쪽이 받으면 gzip 으로 보낸다 (파일마다 한 번 압축해 기억한다)
+ */
+export function distFiles(dist: string): express.RequestHandler {
+  const assets = path.join(dist, 'assets');
+  const forever = 'public, max-age=31536000, immutable';
+  const files = express.static(dist, { setHeaders: (res, file) => path.dirname(file) === assets && res.set({ 'Cache-Control': forever, Vary: 'Accept-Encoding' }) });
+  const zipped = new Map<string, Buffer>();
+  return (req, res, next) => {
+    const name = /^\/assets\/([\w.-]+\.(?:js|css|svg))$/.exec(req.path)?.[1];
+    if (!name || !gzipOk(req)) return files(req, res, next);
+    let gz = zipped.get(name);
+    if (!gz && existsSync(path.join(assets, name))) zipped.set(name, (gz = gzipSync(readFileSync(path.join(assets, name)))));
+    if (!gz) return files(req, res, next);
+    res.type(path.extname(name)).set({ 'Content-Encoding': 'gzip', 'Cache-Control': forever, Vary: 'Accept-Encoding' }).send(gz);
+  };
+}
 
 export function createApp({ config, monitor, runner, configEditor, terminal, testPush }: AppDeps) {
   const app = express();
@@ -142,23 +190,34 @@ export function createApp({ config, monitor, runner, configEditor, terminal, tes
 
   const api = express.Router();
 
-  api.get('/snapshot', (_req, res) => void res.json(monitor.snapshot));
+  // 처음 띄울 때 받는 것도 실시간 스냅샷과 같은 가벼운 것이다 (한 프로젝트의 전체는 아래)
+  api.get('/snapshot', (req, res) => sendJson(req, res, slimSnapshot(monitor.snapshot)));
 
   // 한 프로젝트의 전체 상태 (스트림에서 뺀 기준점 이후 커밋·파일 목록 포함). Git 탭이 열 때 받는다
   api.get('/projects/:id', (req, res) => {
     const project = monitor.snapshot.projects.find((p) => p.id === req.params.id);
     if (!project) return void res.status(404).json({ error: '프로젝트를 찾을 수 없습니다' });
-    res.json(project);
+    sendJson(req, res, project);
   });
 
   api.get('/events', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    // 받는 쪽이 받으면 gzip 으로. 스냅샷마다 비워 보내(sync flush) 늦지 않게 하고, 압축 사전은 이어 써서 비슷한 다음 스냅샷이 더 작아진다
+    const gz = gzipOk(req) ? createGzip() : null;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', Vary: 'Accept-Encoding', ...(gz && { 'Content-Encoding': 'gzip' }) });
+    gz?.pipe(res);
+    const out = gz ?? res;
     // 느린 클라이언트에는 쌓아 두지 않고 건너뛴다. 스냅샷은 매번 전체 상태라 다음 것만 받아도 된다.
     const send = (s: unknown) => {
-      if (!res.writableNeedDrain) res.write(`data: ${JSON.stringify(s)}\n\n`);
+      if (out.writableNeedDrain || res.writableNeedDrain) return;
+      out.write(`data: ${JSON.stringify(s)}\n\n`);
+      gz?.flush(constants.Z_SYNC_FLUSH);
     };
     send(slimSnapshot(monitor.snapshot));
-    req.on('close', monitor.subscribe((s) => send(slimSnapshot(s))));
+    const stop = monitor.subscribe((s) => send(slimSnapshot(s)));
+    req.on('close', () => {
+      stop();
+      gz?.destroy();
+    });
   });
 
   // 요청 본문은 읽지 않는다. 실행되는 명령은 항상 config 에 적힌 것.

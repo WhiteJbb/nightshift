@@ -44,8 +44,13 @@ export interface GitInfo {
   deletions: number;
   recentCommits: Commit[];
   todayCommits: Commit[];
-  /** 활동 감지용 불투명 지문 (HEAD + 변경 파일들의 크기·수정 시각). UI 는 쓰지 않는다. */
+  /** 활동 감지용 불투명 지문 (HEAD + 변경 파일들의 크기·수정 시각). UI 는 쓰지 않는다 (실시간 스냅샷에서는 빈 값). */
   fingerprint: string;
+  /**
+   * 실시간 스냅샷에서 파일 목록(changedFiles·diffStat)을 잘랐을 때: 실제 변경 파일 수와 전체 목록의 지문.
+   * 전체는 /api/projects/:id 로 받고, 지문이 바뀌면 다시 받는다 (Git 지문은 앞쪽 파일만 보므로 뒤쪽 변화는 lastGitChangeAt 에 잡히지 않는다)
+   */
+  cut?: { total: number; key: string };
 }
 
 /** 모니터링이 이 프로젝트를 처음 확인한 시점의 기준점 */

@@ -453,7 +453,7 @@ export function ProjectCard({ p, now, onHidden }: { p: ProjectSnapshot; now: str
                 '변경 없음'
               ) : (
                 <>
-                  파일 {git.changedFiles.length}개 <span className="add">+{git.additions}</span> <span className="del">−{git.deletions}</span>
+                  파일 {git.cut?.total ?? git.changedFiles.length}개 <span className="add">+{git.additions}</span> <span className="del">−{git.deletions}</span>
                 </>
               )}
             </span>

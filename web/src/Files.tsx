@@ -221,7 +221,8 @@ let clipboard: { scope: string; path: string; cut: boolean } | null = null;
 const DRAG_TYPE = 'application/x-nightshift-path';
 
 function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (path: string) => void }) {
-  const [list, setList] = useState<{ files: string[]; ignored: string[] } | null>(null);
+  // changed: 실시간 스냅샷의 변경 파일 목록이 잘려 있을 때(cut) 따로 받은 전체
+  const [list, setList] = useState<{ files: string[]; ignored: string[]; changed?: ProjectSnapshot['git']['changedFiles'] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   // 무시된 파일(.env) 이 생기거나 지워진 것은 Git 변화로 잡히지 않아서 직접 다시 받는 버튼을 둔다
@@ -289,6 +290,8 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
   const [opError, setOpError] = useState<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
 
+  const cut = p.git.cut?.key;
+  const changedFiles = list?.changed ?? p.git.changedFiles;
   const known = useMemo(() => new Set(list?.files), [list]);
   const ignored = useMemo(() => new Set(list?.ignored), [list]);
   const all = useMemo(() => (list ? [...list.files, ...list.ignored].sort() : []), [list]);
@@ -297,10 +300,10 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
   useEffect(() => {
     // 새로 받기 시작하면 앞의 응답은 버린다 (늦게 와도 새 목록을 덮지 않게)
     let current = true;
-    api.files(p.id).then(
-      (r) => {
+    Promise.all([api.files(p.id), cut ? api.project(p.id).then((x) => x.git.changedFiles) : undefined]).then(
+      ([r, changed]) => {
         if (!current) return;
-        setList(r);
+        setList({ ...r, ...(changed && { changed }) });
         setError(null);
       },
       (e: unknown) => current && setError(errorMessage(e)),
@@ -308,7 +311,7 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
     return () => {
       current = false;
     };
-  }, [p.id, p.repoPath, p.lastGitChangeAt, refresh]);
+  }, [p.id, p.repoPath, p.lastGitChangeAt, cut, refresh]);
   if (error) {
     return (
       <p className="err" role="alert">
@@ -362,7 +365,7 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
   };
   const remove = async (path: string) => {
     // Git 에 없는 것(새 파일 ?? 나 무시된 파일)이 들어 있으면 휴지통 말고는 되살릴 길이 없다고 알린다
-    const untracked = [...ignored, ...p.git.changedFiles.filter((f) => f.status === '??').map((f) => f.path)].some((f) => f === path || (path.endsWith('/') && f.startsWith(path)))
+    const untracked = [...ignored, ...changedFiles.filter((f) => f.status === '??').map((f) => f.path)].some((f) => f === path || (path.endsWith('/') && f.startsWith(path)))
       ? '\nGit 에 없는 파일이 있어 Git 으로는 되살릴 수 없습니다.'
       : '';
     const drafts = unsaved(path) || (path.endsWith('/') && all.some((f) => f.startsWith(path) && unsaved(f))) ? '\n저장하지 않은 내용도 버립니다.' : '';
@@ -493,7 +496,7 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
   const q = query.trim().toLowerCase();
   const matches = q ? all.filter((f) => f.toLowerCase().includes(q)) : [];
   // 지운 파일은 열 수 없으니 뺀다
-  const changed = p.git.changedFiles.filter((f) => known.has(f.path));
+  const changed = changedFiles.filter((f) => known.has(f.path));
   const unsaved = (path: string) => store.get(draftKey(scopeOf(p), path)) !== null;
   const item = (path: string, where: string, { status, label = path, depth = 0 }: { status?: string; label?: string; depth?: number } = {}) => (
     // 파일 위에 놓으면 그 파일이 있는 폴더로 (IDE 처럼). 안 그러면 맨 위 영역까지 올라가 엉뚱하게 맨 위로 옮겨진다
