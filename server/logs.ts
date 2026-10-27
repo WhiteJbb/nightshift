@@ -65,12 +65,12 @@ export function waitingOnBackground(lines: string[]): boolean {
 }
 /**
  * 화면의 절대경로("/…/dir/이름/…", "'~/…/dir/이름'")에 나온 dir 바로 아래 이름들. 많이 나온 것부터, 같으면 나중에 나온 것부터.
- * 이름에 빈칸·괄호가 있어도 되게 "/"·따옴표로 끝난 것만 센다 ("…"로 잘린 경로는 빠진다)
+ * dirs 는 한 폴더의 여러 이름이다 (링크와 실제 경로). 이름에 빈칸·괄호가 있어도 되게 "/"·따옴표로 끝난 것만 센다 ("…"로 잘린 경로는 빠진다)
  */
-export function mentionedIn(lines: string[], dir: string, home: string): string[] {
+export function mentionedIn(lines: string[], dirs: string[], home: string): string[] {
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const tilde = dir.startsWith(`${home}/`) ? `|~${esc(dir.slice(home.length))}` : '';
-  const re = new RegExp(`(?:${esc(dir)}${tilde})/([^/'"]+)[/'"]`, 'g');
+  const forms = dirs.flatMap((d) => [esc(d), ...(d.startsWith(`${home}/`) ? [`~${esc(d.slice(home.length))}`] : [])]);
+  const re = new RegExp(`(?:${forms.join('|')})/([^/'"]+)[/'"]`, 'g');
   const seen = new Map<string, { n: number; at: number }>();
   let at = 0;
   for (const line of lines) for (const m of line.matchAll(re)) seen.set(m[1]!, { n: (seen.get(m[1]!)?.n ?? 0) + 1, at: at++ });

@@ -299,12 +299,14 @@ export class Monitor {
   private async followRepo(p: ProjectConfig, raw: RawTmux): Promise<{ project: ProjectConfig; git: GitInfo }> {
     const git = await this.opts.collector.git(p);
     if (git.ok || git.error !== NOT_A_REPO) return { project: p, git };
-    const cwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
+    const paneCwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
     const followed = this.tracked.get(p.id)?.repoPath;
     // 홈이 링크일 수 있다 (설정 경로는 실제 폴더로 적었을 수 있다)
     const real = (dir: string) => realpath(dir).catch(() => dir);
     const parent = path.dirname(p.repoPath);
     const [where, home, up] = await Promise.all([real(p.repoPath), real(homedir()), real(parent)]);
+    // 상위 폴더가 링크면 tmux 는 실제 경로를 알려 준다: 옆 폴더는 설정 경로의 이름으로 맞춘다
+    const cwd = paneCwd && path.dirname(paneCwd) === up ? path.join(parent, path.basename(paneCwd)) : paneCwd;
     const fromHome = !path.relative(where, home).startsWith('..');
     const procs = fromHome && raw.exists && p.tmuxSession && this.opts.collector.workDirs ? await this.opts.collector.workDirs(p.tmuxSession) : null;
     // 홈(이나 그 위)의 바로 아래는 옆 폴더로 보지 않는다 (~/.venvs, ~/repos 같은 것이라 프로젝트가 아니다)
@@ -318,8 +320,8 @@ export class Monitor {
     if (nearby && readable) {
       // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)
       const above = aboveInput(raw.output);
-      const typing = above.findLastIndex((l) => l.startsWith('› '));
-      for (const name of mentionedIn(typing < 0 ? above : above.slice(0, typing), parent, homedir())) {
+      const typing = above.findLastIndex((l) => /^›(?: |$)/.test(l));
+      for (const name of mentionedIn(typing < 0 ? above : above.slice(0, typing), [...new Set([parent, up])], homedir())) {
         const dir = path.join(parent, name);
         if ((await stat(dir).catch(() => null))?.isDirectory()) {
           beside = dir;

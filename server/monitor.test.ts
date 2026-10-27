@@ -10,6 +10,7 @@ import { collectGit, repoRoot } from './git.ts';
 import type { Collector, RawTmux } from './monitor.ts';
 import { attachCommand, Monitor, NO_LOG, READY_TICKS } from './monitor.ts';
 import { Runner } from './runner.ts';
+import { cleanOutput } from './tmux.ts';
 
 const T0 = Date.parse('2026-10-04T03:00:00Z');
 const noRuns = () => ({ test: null, build: null });
@@ -612,6 +613,24 @@ describe('followRepo to a folder beside the configured one', () => {
       output = [`› cat '${down}/과제 (2)/a.py' '${down}/과제 (2)/b.py'`, '  gpt-6 high · ~'];
       await first.tick();
       expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+      // 빈 입력칸은 줄 끝 공백이 잘려 "›" 만 남는다. 그 위의 보낸 글 뒤에 나온 경로는 센다
+      output = cleanOutput(['› 과제 (2) 로 돌아가', `• Edited ${down}/과제 (2)/a.py`, `• Edited ${down}/과제 (2)/b.py`, '› ', '  gpt-6 high · ~'].join('\n'));
+      await first.tick();
+      expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제 (2)'));
+
+      // 상위 폴더가 링크면 tmux 는 실제 경로를 알려 준다. 설정 경로의 이름으로 따라간다
+      symlinkSync(down, path.join(home, 'dl'));
+      const linked = parseConfig({ projects: [{ name: 'ppo', repoPath: path.join(home, 'dl', '과제 (2)'), tmuxSession: 'ppo' }] }, '/base');
+      output = [];
+      pane.cwd = path.join(down, '과제(3)');
+      const viaLink = new Monitor({ config: linked, collector, runs: noRuns, now: () => T0 });
+      await viaLink.tick();
+      expect(viaLink.snapshot.projects[0]!.repoPath).toBe(path.join(home, 'dl', '과제(3)'));
+      // 화면에 나온 실제 경로도 같은 폴더로 센다
+      pane.cwd = home;
+      output = [`• Edited ${down}/과제 (2)/a.py`];
+      await viaLink.tick();
+      expect(viaLink.snapshot.projects[0]!.repoPath).toBe(path.join(home, 'dl', '과제 (2)'));
     } finally {
       process.env.HOME = was;
       rmSync(home, { recursive: true });
