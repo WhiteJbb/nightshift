@@ -225,9 +225,12 @@ export class Monitor {
     return { startedAt: this.startedAt, tracked, off: [...this.off.keys()] };
   }
 
-  /** 세션을 꺼 둔 것으로 표시하거나 푼다 (세션 종료 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다) */
-  setOff(projectId: string, on: boolean): void {
-    if (on) this.off.set(projectId, false);
+  /**
+   * 세션을 꺼 둔 것으로 표시하거나 푼다 (세션 종료 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다).
+   * gone: 이미 꺼진 세션이다 (그러면 다음 tick 전에 다시 켜도 풀린다)
+   */
+  setOff(projectId: string, on: boolean, gone = false): void {
+    if (on) this.off.set(projectId, gone);
     else this.off.delete(projectId);
     this.publish();
   }

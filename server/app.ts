@@ -423,7 +423,7 @@ export function createApp({ config, monitor, runner, configEditor, terminal, tes
     if (blocked) return void res.status(403).json({ error: blocked });
     if (!project.tmuxSession) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
     if (project.tmux.exists) return void res.status(409).json({ error: '세션이 돌고 있습니다. 끄려면 세션 종료를 누르세요' });
-    monitor.setOff(project.id, true);
+    monitor.setOff(project.id, true, true);
     res.json({ ok: true });
   });
 

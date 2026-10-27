@@ -59,9 +59,14 @@ describe('ending a session', () => {
       expect(m.snapshot.projects[0]!.status.state).toBe('error');
       expect((await fetch(`${url}/off`, { method: 'POST' })).status).toBe(200);
       expect(m.snapshot.projects[0]!.status.state).toBe('off');
+      // 다음 tick 전에 다시 켜도 풀린다 (이미 꺼진 것을 알고 있다). 그 뒤에 저절로 꺼지면 오류다
       exists = true;
       await m.tick();
+      expect(m.exportState().off).toEqual([]);
       expect((await fetch(`${url}/off`, { method: 'POST' })).status).toBe(409);
+      exists = false;
+      await m.tick();
+      expect(m.snapshot.projects[0]!.status.state).toBe('error');
     } finally {
       app.close();
     }
