@@ -530,6 +530,12 @@ main {
 .page {
   max-width: 1180px;
 }
+/* 컴퓨터에서 터미널 탭은 창 폭을 다 쓴다: 큰 화면에서 터미널이 왼쪽에만 붙지 않게, 나란히 보기의 칸도 넓게 (다른 탭은 읽기 좋은 폭을 지킨다) */
+@media (pointer: fine) {
+  .page:has(.term-wrap) {
+    max-width: none;
+  }
+}
 /* HUD: 오른쪽 위의 버전 표시와 오른쪽 가장자리의 세로 글씨. 장식이라 보조 기술엔 숨긴다 */
 .hud {
   position: fixed;
