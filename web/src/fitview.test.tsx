@@ -16,7 +16,7 @@ function View({ on, size, k, measure, fit }: { on: boolean; size: TermSize | nul
   return <div ref={ref} />;
 }
 
-// jsdom 에는 ResizeObserver 와 레이아웃이 없다. 알림을 직접 보내고, 폭은 clientWidth 로 정한다
+// jsdom 에는 ResizeObserver 와 레이아웃이 없다. 알림을 직접 보내고, 폭은 offsetWidth 로 정한다
 let width = 600;
 const observed: (() => void)[] = [];
 vi.stubGlobal(
@@ -29,7 +29,7 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
-Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => width });
+Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => width });
 
 test('fits once drawn, follows window resizes and width changes, and leaves alone a size another screen set', async () => {
   vi.useFakeTimers();
