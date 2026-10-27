@@ -1,10 +1,12 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitInfo, Snapshot, TmuxPane } from '../shared/types.ts';
+import { NOT_A_REPO } from '../shared/types.ts';
 import { parseConfig } from './config.ts';
 import { demoCollector, demoConfig, seedDemoRuns } from './demo.ts';
+import { collectGit, repoRoot } from './git.ts';
 import type { Collector, RawTmux } from './monitor.ts';
 import { attachCommand, Monitor, NO_LOG, READY_TICKS } from './monitor.ts';
 import { Runner } from './runner.ts';
@@ -509,6 +511,62 @@ describe('followRepo with a linked home folder', () => {
       process.env.HOME = home;
       rmSync(link);
       rmSync(real, { recursive: true });
+    }
+  });
+});
+
+describe('followRepo to a folder beside the configured one', () => {
+  it('follows the sibling folder an agent works in by absolute paths, keeps it, and comes back', async () => {
+    const home = realpathSync(mkdtempSync(path.join(tmpdir(), 'nightshift-home-')));
+    const was = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const down = path.join(home, 'Downloads');
+      for (const d of ['과제 (2)', '과제(3)', '.venvs/rl/bin']) mkdirSync(path.join(down, d), { recursive: true });
+      writeFileSync(path.join(down, '과제 (2).pdf'), '');
+      mkdirSync(path.join(home, 'proj'));
+      mkdirSync(path.join(home, '.venvs'));
+      const cfg = parseConfig({ projects: [{ name: 'ppo', repoPath: path.join(down, '과제 (2)'), tmuxSession: 'ppo' }, { name: 'near-home', repoPath: path.join(home, 'proj'), tmuxSession: 'ppo' }] }, '/base');
+      let output: string[] = [];
+      const pane = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'codex', active: true, cols: 80, lines: [], cwd: home };
+      const collector: Collector = {
+        git: (p) => collectGit(p.repoPath),
+        since: async (_p, baseline) => ({ baseline, commits: [], files: [], additions: 0, deletions: 0 }),
+        tmux: async () => new Map(['ppo', 'near-home'].map((id) => [id, { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: null, output, panes: [pane], waitingPrompt: null, attachCommand: 'x' }])),
+        logErrors: async () => NO_LOG,
+        repoRoot,
+      };
+      const m = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0 });
+      const where = (id = 'ppo') => m.snapshot.projects.find((p) => p.id === id)!.repoPath;
+
+      // 홈에서 띄운 Codex 가 과제(3) 을 절대경로로만 다룬다. 파일(과제 (2).pdf), 잘린 경로, 홈 바로 아래(~/proj 의 옆) 폴더는 세지 않는다
+      output = [
+        `• Ran '${down}/.venvs/rl/bin/python' '${down}/과제(3)/작업자료/make_report.py'`,
+        `  └ ${down}/과제(3)/보고서.pdf`,
+        `• Ran open '${down}/과제 (2).pdf' '${down}/과제 (2).pdf' '${down}/과제 (2).pdf'`,
+        `• Ran pdftoppm '${down}/과제(3…`,
+        `• Ran cat '${home}/.venvs/a' '${home}/.venvs/b' '${home}/.venvs/c'`,
+      ];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제(3)'));
+      expect(m.snapshot.projects[0]!.git.error).toBe(NOT_A_REPO);
+      expect(where('near-home')).toBe(path.join(home, 'proj'));
+
+      // 화면이 비어도, 다시 띄워도 유지한다
+      output = [];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제(3)'));
+      const again = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
+      await again.tick();
+      expect(again.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+
+      // 등록한 폴더(~ 로 쓴 경로도)가 더 많이 나오면 돌아온다
+      output = ['• Edited ~/Downloads/과제 (2)/a.py (+1 -1)', `• Ran cat '${down}/과제 (2)/b.py'`, `  └ ${down}/과제(3)/보고서.pdf`];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
+    } finally {
+      process.env.HOME = was;
+      rmSync(home, { recursive: true });
     }
   });
 });

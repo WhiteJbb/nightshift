@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { GitBaseline, GitInfo, ProjectSnapshot, RunKind, RunResult, RunSummary, SinceBaseline, Snapshot, TmuxInfo } from '../shared/types.ts';
@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
+import { aboveInput, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -287,6 +287,8 @@ export class Monitor {
    * 저장소가 아닌 경로로 등록된 프로젝트는 pane 이 Git 저장소 안으로 cd 하면 그 저장소를 따라간다 (config 는 바꾸지 않는다).
    * 홈 폴더(나 그 위)로 등록된 세션은 에이전트를 홈에서 띄운 것이라, 에이전트가 명령을 돌리는 폴더(Codex 의 workdir 등)의 저장소도 따라간다.
    * 한 번 따라간 저장소는 pane 이 다른 곳으로 가도 저장소인 동안 유지하고, 에이전트가 다른 저장소에서 일하기 시작하면 그리로 옮긴다.
+   * 홈 밖의 폴더로 등록한 프로젝트는 에이전트가 옆 폴더(같은 상위 폴더 안: 과제2 → 과제3 등)로 옮겨 가 일하는 것도, 저장소가 아니어도 따라간다.
+   * 홈에서 띄운 에이전트가 절대경로로만 다루면 명령의 작업 폴더로는 알 수 없어서, 화면의 경로에 가장 많이 나온 옆 폴더를 본다.
    */
   private async followRepo(p: ProjectConfig, raw: RawTmux): Promise<{ project: ProjectConfig; git: GitInfo }> {
     const git = await this.opts.collector.git(p);
@@ -295,23 +297,41 @@ export class Monitor {
     const followed = this.tracked.get(p.id)?.repoPath;
     // 홈이 링크일 수 있다 (설정 경로는 실제 폴더로 적었을 수 있다)
     const real = (dir: string) => realpath(dir).catch(() => dir);
-    const [where, home] = await Promise.all([real(p.repoPath), real(homedir())]);
+    const parent = path.dirname(p.repoPath);
+    const [where, home, up] = await Promise.all([real(p.repoPath), real(homedir()), real(parent)]);
     const fromHome = !path.relative(where, home).startsWith('..');
     const procs = fromHome && raw.exists && p.tmuxSession && this.opts.collector.workDirs ? await this.opts.collector.workDirs(p.tmuxSession) : null;
+    // 홈(이나 그 위)의 바로 아래는 옆 폴더로 보지 않는다 (~/.venvs, ~/repos 같은 것이라 프로젝트가 아니다)
+    // ponytail: 옆 폴더만 본다. 멀리 떨어진, 저장소 아닌 폴더는 어디까지가 프로젝트인지 알 수 없다
+    const nearby = !fromHome && path.relative(up, home).startsWith('..');
+    const sibling = (dir: string) => nearby && path.dirname(dir) === parent;
+    let beside: string | undefined;
+    for (const name of nearby ? mentionedIn(raw.output, parent, homedir()) : []) {
+      const dir = path.join(parent, name);
+      if ((await stat(dir).catch(() => null))?.isDirectory()) {
+        beside = dir;
+        break;
+      }
+    }
     // 같은 저장소의 하위 폴더들은 맨 위로 모은다 (폴더마다 다른 프로젝트로 보면 추적 기록이 매번 새로 시작된다)
     const roots = new Map<string, string | null>();
-    for (const dir of new Set([cwd, followed, ...(procs ?? []).map((x) => x.dir)])) {
-      if (dir) roots.set(dir, this.opts.collector.repoRoot ? await this.opts.collector.repoRoot(dir) : dir);
+    for (const dir of new Set([cwd, beside, followed, ...(procs ?? []).map((x) => x.dir)])) {
+      if (dir) roots.set(dir, (this.opts.collector.repoRoot ? await this.opts.collector.repoRoot(dir) : dir) ?? (sibling(dir) ? dir : null));
     }
     const fresh = procs ? this.freshWork(p, procs, followed, (dir) => roots.get(dir) ?? null) : [];
     const tried = new Set<string>();
-    for (const dir of new Set([cwd, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
+    for (const dir of new Set([cwd, beside, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
       const root = dir ? roots.get(dir) : null;
-      if (!root || root === p.repoPath || tried.has(root)) continue;
+      if (!root || tried.has(root)) continue;
+      // 화면에 가장 많이 나온 옆 폴더가 등록한 폴더면 그리로 돌아온다
+      if (root === p.repoPath) {
+        if (dir === beside) break;
+        continue;
+      }
       tried.add(root);
       const project = { ...p, repoPath: root };
       const found = await this.opts.collector.git(project);
-      if (found.ok) return { project, git: found };
+      if (found.ok || (sibling(root) && found.error === NOT_A_REPO)) return { project, git: found };
     }
     return { project: p, git };
   }
