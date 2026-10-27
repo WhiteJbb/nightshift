@@ -1119,18 +1119,19 @@ function Stats({ files, additions, deletions, empty }: { files: FileStat[]; addi
 }
 
 export function GitTab({ project: p, now }: Props) {
-  const { git } = p;
-  // 실시간 스냅샷의 기준점 정보는 목록이 빠진 요약이다 (partial). 탭을 열거나 Git 이 바뀌면 전체를 받는다
-  const [full, setFull] = useState<ProjectSnapshot['since']>(null);
+  // 실시간 스냅샷의 기준점 정보는 목록이 빠진 요약이고 (partial), 변경 파일이 많으면 그 목록도 잘려 있다 (changedTotal).
+  // 탭을 열거나 Git 이 바뀌면 전체를 받는다
+  const cut = p.git.changedTotal !== undefined;
+  const [full, setFull] = useState<ProjectSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
-    if (!p.since?.partial) return;
+    if (!p.since?.partial && !cut) return;
     let live = true;
     api.project(p.id).then(
       (x) => {
         if (!live) return;
-        setFull(x.since);
+        setFull(x);
         setLoadError(null);
       },
       (e: unknown) => live && setLoadError(errorMessage(e)),
@@ -1138,8 +1139,9 @@ export function GitTab({ project: p, now }: Props) {
     return () => {
       live = false;
     };
-  }, [p.id, p.lastGitChangeAt, p.since?.partial, p.since?.baseline.at, retry]);
-  const since = p.since?.partial ? full : p.since;
+  }, [p.id, p.lastGitChangeAt, p.since?.partial, p.since?.baseline.at, cut, retry]);
+  const since = p.since?.partial ? (full?.since ?? null) : p.since;
+  const git = cut && full ? full.git : p.git;
   return (
     <>
       {git.ok ? (
@@ -1156,7 +1158,7 @@ export function GitTab({ project: p, now }: Props) {
           </dl>
 
           <section>
-            <h3>변경된 파일 ({git.changedFiles.length})</h3>
+            <h3>변경된 파일 ({git.changedTotal ?? git.changedFiles.length})</h3>
             {git.changedFiles.length === 0 ? (
               <p className="dim">변경된 파일이 없습니다.</p>
             ) : (
@@ -1201,7 +1203,7 @@ export function GitTab({ project: p, now }: Props) {
 
       {loadError && (
         <p className="err" role="alert">
-          기준점 이후 목록을 불러오지 못했습니다: {loadError}{' '}
+          전체 목록을 불러오지 못했습니다: {loadError}{' '}
           <button type="button" className="more-rows" onClick={() => setRetry(retry + 1)}>
             다시 불러오기
           </button>

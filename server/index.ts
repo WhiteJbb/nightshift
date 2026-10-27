@@ -2,8 +2,7 @@ import { existsSync, statSync, watchFile } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { cloneRepo } from './git.ts';
-import express from 'express';
-import { createApp, isTailscaleAddress } from './app.ts';
+import { createApp, distFiles, isTailscaleAddress } from './app.ts';
 import { ConfigError, defaultConfigPath, expandPath, loadConfig, SESSION_RE } from './config.ts';
 import { applyConfigUpdate, readConfigView, readOnlyView } from './configEdit.ts';
 import { demoCollector, demoConfig, demoExec, seedDemoRuns } from './demo.ts';
@@ -190,7 +189,7 @@ const terminal = demo ? undefined : { send: sendInput, sendRaw, stream: (session
       console.error('dist/web 이 없습니다. 먼저 `npm run build` 를 실행하거나 `npm run dev` 를 사용하세요.');
       process.exit(1);
     }
-    app.use(express.static(dist));
+    app.use(distFiles(dist));
   }
 
   server.on('error', (e: NodeJS.ErrnoException) => {

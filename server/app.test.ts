@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createApp, guard, slimSnapshot } from './app.ts';
+import { createApp, distFiles, guard, slimSnapshot, STREAM_FILES } from './app.ts';
 import { parseConfig } from './config.ts';
 import { demoCollector } from './demo.ts';
 import { Monitor, SNAPSHOT_OUTPUT_CHARS } from './monitor.ts';
@@ -34,6 +38,55 @@ describe('API', () => {
     const one = await (await fetch(`${base}/api/projects/${full.id}`)).json();
     expect(one.since?.partial).toBeUndefined();
     expect((await fetch(`${base}/api/projects/nope`)).status).toBe(404);
+  });
+
+  it('the live stream cuts long changed-file lists, keeps the real count and drops the Git fingerprint', () => {
+    const p = monitor.snapshot.projects[0]!;
+    const many = Array.from({ length: STREAM_FILES + 1 }, (_, i) => ({ path: `f${i}`, status: '??' }));
+    const big = slimSnapshot({ ...monitor.snapshot, projects: [{ ...p, git: { ...p.git, changedFiles: many, fingerprint: 'x' } }] }).projects[0]!.git;
+    expect(big).toMatchObject({ changedTotal: STREAM_FILES + 1, fingerprint: '' });
+    expect(big.changedFiles).toHaveLength(STREAM_FILES);
+    expect(slimSnapshot(monitor.snapshot).projects[0]!.git.changedTotal).toBeUndefined();
+  });
+
+  it('gzips the snapshot, a project and the live stream for clients that accept it', async () => {
+    for (const url of ['/api/snapshot', '/api/projects/app']) {
+      const r = await fetch(`${base}${url}`, { headers: { 'Accept-Encoding': 'gzip' } });
+      expect(r.headers.get('content-encoding')).toBe('gzip');
+      expect(await r.json()).toBeTruthy();
+      expect((await fetch(`${base}${url}`, { headers: { 'Accept-Encoding': 'identity' } })).headers.get('content-encoding')).toBeNull();
+    }
+    // 스트림은 스냅샷마다 비워 보내므로 압축해도 첫 스냅샷이 바로 온다
+    const stop = new AbortController();
+    const r = await fetch(`${base}/api/events`, { headers: { 'Accept-Encoding': 'gzip' }, signal: stop.signal });
+    expect(r.headers.get('content-encoding')).toBe('gzip');
+    const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let text = '';
+    while (!text.includes('\n\n')) text += (await reader.read()).value ?? '';
+    expect(JSON.parse(text.slice('data: '.length)).projects).toHaveLength(1);
+    stop.abort();
+  });
+
+  it('serves built assets gzipped and cached for good, and revalidates index.html', async () => {
+    const dist = mkdtempSync(path.join(tmpdir(), 'nightshift-dist-'));
+    mkdirSync(path.join(dist, 'assets'));
+    writeFileSync(path.join(dist, 'index.html'), '<!doctype html>');
+    writeFileSync(path.join(dist, 'assets', 'index-abc.js'), 'console.log(1);'.repeat(100));
+    const web = express().use(distFiles(dist)).listen(0, '127.0.0.1');
+    await new Promise((ok) => web.once('listening', ok));
+    try {
+      const at = `http://127.0.0.1:${(web.address() as AddressInfo).port}`;
+      const js = await fetch(`${at}/assets/index-abc.js`, { headers: { 'Accept-Encoding': 'gzip' } });
+      expect(js.headers.get('content-encoding')).toBe('gzip');
+      expect(js.headers.get('content-type')).toMatch(/javascript/);
+      expect(js.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(await js.text()).toBe('console.log(1);'.repeat(100));
+      expect((await fetch(`${at}/index.html`)).headers.get('cache-control')).toBe('public, max-age=0');
+      expect((await fetch(`${at}/assets/nope.js`, { headers: { 'Accept-Encoding': 'gzip' } })).status).toBe(404);
+    } finally {
+      web.close();
+      rmSync(dist, { recursive: true });
+    }
   });
 
   it('runs only registered commands and ignores the request body', async () => {
