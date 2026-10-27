@@ -8,7 +8,11 @@ import type { ExecResult } from './exec.ts';
 import { run } from './exec.ts';
 import { cloneRepo, collectGit, collectSince, GIT_URL_RE, parseNumstat, parseStatus, repoNameFrom } from './git.ts';
 
-vi.mock('./exec.ts', () => ({ run: vi.fn() }));
+// 줄 세운 실행도 같은 가짜 run 으로 간다
+vi.mock('./exec.ts', () => {
+  const run = vi.fn();
+  return { run, runQueued: (...args: unknown[]) => run(...args) };
+});
 const mockRun = vi.mocked(run);
 
 const ok = (stdout: string): ExecResult => ({ code: 0, stdout, stderr: '', timedOut: false });
