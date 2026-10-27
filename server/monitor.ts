@@ -146,7 +146,7 @@ export class Monitor {
   /** 프로젝트마다 지난 tick 에 본, 에이전트가 돌리던 프로세스들과 그때의 저장소 (followRepo) */
   private workSeen = new Map<string, Map<number, string | null>>();
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
-  private looked = new Map<string, { cwd: string | undefined; beside: string | undefined }>();
+  private looked = new Map<string, { cwd: string | null; beside: string | null }>();
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -164,6 +164,7 @@ export class Monitor {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
       if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, busyAt: saved.busyAt ?? null });
+      if (saved?.looked) this.looked.set(p.id, saved.looked);
     }
     this.snapshot = this.build();
   }
@@ -186,6 +187,7 @@ export class Monitor {
         if (keep.get(id) !== old.get(id)) {
           this.tracked.delete(id);
           this.collected.delete(id);
+          this.looked.delete(id);
         }
       }
       this.opts = { ...this.opts, config, collector, configMissing };
@@ -211,7 +213,7 @@ export class Monitor {
     const tracked: MonitorState['tracked'] = {};
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
     return { startedAt: this.startedAt, tracked };
   }
@@ -220,6 +222,7 @@ export class Monitor {
   reset(): Promise<void> {
     return this.serial(async () => {
       this.tracked.clear();
+      this.looked.clear();
       this.startedAt = new Date(this.now()).toISOString();
       await this.collectAll();
     });
@@ -256,6 +259,7 @@ export class Monitor {
       if (!projects.some((p) => p.id === id)) {
         this.tracked.delete(id);
         this.collected.delete(id);
+        this.looked.delete(id);
       }
     }
     let tmuxError: string | undefined;
@@ -307,14 +311,20 @@ export class Monitor {
     // ponytail: 옆 폴더만 본다. 멀리 떨어진, 저장소 아닌 폴더는 어디까지가 프로젝트인지 알 수 없다
     const nearby = !fromHome && path.relative(up, home).startsWith('..');
     const sibling = (dir: string) => nearby && path.dirname(dir) === parent;
-    let beside: string | undefined;
-    // 위로 올려 본 지난 화면과 입력칸에 치는 중인 글은 일하는 곳이 아니다
-    const screen = scrolledUp(raw.output) ? [] : aboveInput(raw.output);
-    for (const name of nearby ? mentionedIn(screen, parent, homedir()) : []) {
-      const dir = path.join(parent, name);
-      if ((await stat(dir).catch(() => null))?.isDirectory()) {
-        beside = dir;
-        break;
+    const before = this.looked.get(p.id);
+    // 화면을 못 읽었거나 위로 올려 보는 중이면 지난번 본 것을 그대로 둔다 (내려왔을 때 그대로인 화면을 새 일로 보지 않게)
+    const readable = raw.output.length > 0 && !scrolledUp(raw.output);
+    let beside = nearby && !readable ? (before?.beside ?? null) : null;
+    if (nearby && readable) {
+      // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)
+      const above = aboveInput(raw.output);
+      const typing = above.findLastIndex((l) => l.startsWith('› '));
+      for (const name of mentionedIn(typing < 0 ? above : above.slice(0, typing), parent, homedir())) {
+        const dir = path.join(parent, name);
+        if ((await stat(dir).catch(() => null))?.isDirectory()) {
+          beside = dir;
+          break;
+        }
       }
     }
     // 같은 저장소의 하위 폴더들은 맨 위로 모은다 (폴더마다 다른 프로젝트로 보면 추적 기록이 매번 새로 시작된다)
@@ -324,11 +334,12 @@ export class Monitor {
     }
     const fresh = procs ? this.freshWork(p, procs, followed, (dir) => roots.get(dir) ?? null) : [];
     // 옆 폴더는 pane 이 cd 로 옮겨 가거나 화면에 가장 많이 나온 옆 폴더가 바뀐 때만 본다: 옛 경로가 화면에 남아 있거나
-    // pane 이 에이전트를 띄운 폴더에 그대로 있어도, 그 뒤에 따라간 곳을 되돌리지 않는다. pane 이 저장소 안에 있으면 그 저장소다 (위와 같다)
-    const before = this.looked.get(p.id);
-    this.looked.set(p.id, { cwd, beside });
+    // pane 이 에이전트를 띄운 폴더에 그대로 있어도, 그 뒤에 따라간 곳을 되돌리지 않는다. pane 이 저장소 안에 있으면 그 저장소다 (위와 같다).
+    // 처음 볼 때는 둘 다 보되 화면이 먼저다 (에이전트를 등록한 폴더에서 띄우고 옆 폴더에서 일할 수 있다)
+    const seen = { cwd: cwd ?? before?.cwd ?? null, beside };
+    this.looked.set(p.id, seen);
     const inRepo = !!(cwd && roots.get(cwd));
-    const changed = inRepo ? [] : [before && cwd !== before.cwd ? cwd : undefined, beside !== before?.beside ? beside : undefined];
+    const changed = inRepo ? [] : before ? [seen.cwd !== before.cwd ? cwd : null, beside !== before.beside ? beside : null] : [beside, cwd];
     const tried = new Set<string>();
     for (const dir of new Set([...changed, inRepo ? cwd : undefined, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
       const root = dir ? (roots.get(dir) ?? (sibling(dir) ? dir : null)) : null;

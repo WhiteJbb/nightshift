@@ -584,6 +584,34 @@ describe('followRepo to a folder beside the configured one', () => {
       expect(where()).toBe(path.join(down, '과제 (2)'));
       await m.tick();
       expect(where()).toBe(path.join(down, '과제 (2)'));
+
+      // 위로 올려 봤다 내려와도, 다시 띄워도 남은 옛 경로를 새 일로 보지 않는다
+      const bottom = output;
+      output = [...bottom, '  Jump to bottom (click) ↓', ...box];
+      await m.tick();
+      output = bottom;
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제 (2)'));
+      const restarted = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
+      await restarted.tick();
+      expect(restarted.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제 (2)'));
+
+      // 처음 볼 때 pane 이 이미 옆 폴더에 있으면 그리로
+      output = [];
+      pane.cwd = path.join(down, '과제(3)');
+      const first = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0 });
+      await first.tick();
+      expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+      // 처음부터 다시 세도(reset) 지금 화면으로 다시 찾는다
+      pane.cwd = home;
+      output = [`  └ ${down}/과제(3)/보고서.pdf`];
+      await first.tick();
+      await first.reset();
+      expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+      // Codex 입력칸에 쓰다 만 글은 세지 않는다
+      output = [`› cat '${down}/과제 (2)/a.py' '${down}/과제 (2)/b.py'`, '  gpt-6 high · ~'];
+      await first.tick();
+      expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
     } finally {
       process.env.HOME = was;
       rmSync(home, { recursive: true });

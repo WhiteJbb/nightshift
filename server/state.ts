@@ -21,6 +21,8 @@ export interface TrackedState {
   agent?: boolean;
   /** 에이전트가 작업 중 표시를 마지막으로 띄운 시각 (예전 파일에는 없다) */
   busyAt?: string | null;
+  /** 지난번 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더. 다시 띄웠을 때 남아 있던 화면을 새 일로 보지 않게 한다 (예전 파일에는 없다) */
+  looked?: { cwd: string | null; beside: string | null } | null;
 }
 
 export interface MonitorState {
