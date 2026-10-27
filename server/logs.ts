@@ -70,7 +70,8 @@ export function waitingOnBackground(lines: string[]): boolean {
 export function mentionedIn(lines: string[], dirs: string[], home: string): string[] {
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const forms = dirs.flatMap((d) => [esc(d), ...(d.startsWith(`${home}/`) ? [`~${esc(d.slice(home.length))}`] : [])]);
-  const re = new RegExp(`(?:${forms.join('|')})/([^/'"]+)[/'"]`, 'g');
+  // 경로의 시작이어야 한다 ("/Volumes/backup/Users/…" 처럼 다른 경로 안에 든 것은 아니다)
+  const re = new RegExp(`(?<=^|[\\s'"(\\[=:,])(?:${forms.join('|')})/([^/'"]+)[/'"]`, 'g');
   const seen = new Map<string, { n: number; at: number }>();
   let at = 0;
   for (const line of lines) for (const m of line.matchAll(re)) seen.set(m[1]!, { n: (seen.get(m[1]!)?.n ?? 0) + 1, at: at++ });

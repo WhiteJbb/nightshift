@@ -354,7 +354,8 @@ export class Monitor {
       tried.add(root);
       const project = { ...p, repoPath: root };
       const found = await this.opts.collector.git(project);
-      if (found.ok || (sibling(root) && found.error === NOT_A_REPO)) return { project, git: found };
+      // 옆 폴더는 저장소가 아니어도, git 을 잠깐 못 읽어도(시간 초과 등) 있는 동안 따라간다 (다음에 다시 찾을 신호가 없다)
+      if (found.ok || (sibling(root) && (await stat(root).catch(() => null))?.isDirectory())) return { project, git: found };
     }
     return { project: p, git };
   }

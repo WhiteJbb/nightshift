@@ -529,9 +529,10 @@ describe('followRepo to a folder beside the configured one', () => {
       mkdirSync(path.join(home, '.venvs'));
       const cfg = parseConfig({ projects: [{ name: 'ppo', repoPath: path.join(down, '과제 (2)'), tmuxSession: 'ppo' }, { name: 'near-home', repoPath: path.join(home, 'proj'), tmuxSession: 'ppo' }] }, '/base');
       let output: string[] = [];
+      let stuck: string | null = null;
       const pane = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'codex', active: true, cols: 80, lines: [], cwd: home };
       const collector: Collector = {
-        git: (p) => collectGit(p.repoPath),
+        git: async (p) => (p.repoPath === stuck ? { ...git(), ok: false, error: 'Git 이 응답하지 않습니다' } : collectGit(p.repoPath)),
         since: async (_p, baseline) => ({ baseline, commits: [], files: [], additions: 0, deletions: 0 }),
         tmux: async () => new Map(['ppo', 'near-home'].map((id) => [id, { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: null, output, panes: [pane], waitingPrompt: null, attachCommand: 'x' }])),
         logErrors: async () => NO_LOG,
@@ -540,11 +541,13 @@ describe('followRepo to a folder beside the configured one', () => {
       const m = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0 });
       const where = (id = 'ppo') => m.snapshot.projects.find((p) => p.id === id)!.repoPath;
 
-      // 홈에서 띄운 Codex 가 과제(3) 을 절대경로로만 다룬다. 파일(과제 (2).pdf), 잘린 경로, 홈 바로 아래(~/proj 의 옆) 폴더는 세지 않는다
+      // 홈에서 띄운 Codex 가 과제(3) 을 절대경로로만 다룬다. 파일(과제 (2).pdf), 잘린 경로, 다른 경로 안에 든 같은 경로(백업),
+      // 홈 바로 아래(~/proj 의 옆) 폴더는 세지 않는다
       output = [
         `• Ran '${down}/.venvs/rl/bin/python' '${down}/과제(3)/작업자료/make_report.py'`,
         `  └ ${down}/과제(3)/보고서.pdf`,
         `• Ran open '${down}/과제 (2).pdf' '${down}/과제 (2).pdf' '${down}/과제 (2).pdf'`,
+        `• Ran ls /Volumes/backup${down}/과제 (2)/a /Volumes/backup${down}/과제 (2)/b /Volumes/backup${down}/과제 (2)/c`,
         `• Ran pdftoppm '${down}/과제(3…`,
         `• Ran cat '${home}/.venvs/a' '${home}/.venvs/b' '${home}/.venvs/c'`,
       ];
@@ -553,8 +556,13 @@ describe('followRepo to a folder beside the configured one', () => {
       expect(m.snapshot.projects[0]!.git.error).toBe(NOT_A_REPO);
       expect(where('near-home')).toBe(path.join(home, 'proj'));
 
-      // 화면이 비어도, 다시 띄워도 유지한다
+      // 화면이 비어도, git 을 한 번 못 읽어도, 다시 띄워도 유지한다
       output = [];
+      await m.tick();
+      expect(where()).toBe(path.join(down, '과제(3)'));
+      stuck = path.join(down, '과제(3)');
+      await m.tick();
+      stuck = null;
       await m.tick();
       expect(where()).toBe(path.join(down, '과제(3)'));
       const again = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
