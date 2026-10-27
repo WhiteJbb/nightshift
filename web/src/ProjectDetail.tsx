@@ -1141,7 +1141,8 @@ export function GitTab({ project: p, now }: Props) {
     };
   }, [p.id, p.lastGitChangeAt, p.since?.partial, p.since?.baseline.at, cut, retry]);
   const since = p.since?.partial ? (full?.since ?? null) : p.since;
-  const git = cut && full ? full.git : p.git;
+  // 받은 것에서는 잘린 목록만 쓴다 (나머지는 실시간 스냅샷이 더 새롭다: 자정이 지나면 바뀌는 오늘 커밋 등)
+  const git = cut && full ? { ...p.git, changedFiles: full.git.changedFiles, diffStat: full.git.diffStat } : p.git;
   return (
     <>
       {git.ok ? (
