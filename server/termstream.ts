@@ -58,6 +58,28 @@ export class TermStreams {
     return (this.clients.get(session)?.subs.size ?? 0) > 0;
   }
 
+  /**
+   * 보고 있는 pane 이면 그 컨트롤 모드 연결로 키 바이트를 넣는다. 키마다 tmux 를 따로 띄우지 않아 빠르다
+   * (띄우는 동안 서버가 멈춘다). 보는 연결이 없으면 null. 실패하면 오류 메시지
+   */
+  sendRaw(pane: string, bytes: Uint8Array): Promise<string | null> | null {
+    const client = [...this.clients.values()].find((c) => [...c.subs].some((s) => s.pane === pane));
+    if (!client?.proc.stdin.writable) return null;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+    return new Promise((resolve) => {
+      // 응답 전에 연결이 끊기면 응답이 오지 않는다. 기다리는 입력 요청이 멈추지 않게 실패로 끝낸다
+      const gone = () => resolve('tmux 연결이 끊겼습니다');
+      client.proc.once('exit', gone);
+      this.command(client, [
+        `send-keys -t ${pane} -H ${hex}`,
+        (ok, lines) => {
+          client.proc.off('exit', gone);
+          resolve(ok ? null : lines.join('\n') || 'tmux send-keys 실패');
+        },
+      ]);
+    });
+  }
+
   /** 구독을 시작한다. 돌려주는 함수로 끊는다. */
   subscribe(session: string, pane: string, sink: Sink): () => void {
     const client = this.client(session);

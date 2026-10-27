@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Bin } from './exec.ts';
-import { run, runConfigured } from './exec.ts';
+import { run, runConfigured, runQueued } from './exec.ts';
 
 describe('run', () => {
   it('refuses binaries outside the allowlist', async () => {
@@ -18,6 +18,19 @@ describe('run', () => {
     } finally {
       if (saved !== undefined) process.env.LANG = saved;
     }
+  });
+});
+
+describe('runQueued', () => {
+  it('runs a few at a time and never holds up an unqueued command', async () => {
+    const t = performance.now();
+    const all = Promise.all(Array.from({ length: 8 }, () => runQueued('git', ['-c', 'alias.nap=!sleep 0.3', 'nap'])));
+    const quick = performance.now();
+    expect((await run('git', ['--version'])).code).toBe(0);
+    expect(performance.now() - quick).toBeLessThan(250);
+    expect((await all).every((r) => r.code === 0)).toBe(true);
+    // 4개씩 두 번
+    expect(performance.now() - t).toBeGreaterThanOrEqual(600);
   });
 });
 

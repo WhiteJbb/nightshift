@@ -3,7 +3,11 @@ import { run } from './exec.ts';
 import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
-vi.mock('./exec.ts', () => ({ run: vi.fn() }));
+// 줄 세운 실행도 같은 가짜 run 으로 간다
+vi.mock('./exec.ts', () => {
+  const run = vi.fn();
+  return { run, runQueued: (...args: unknown[]) => run(...args) };
+});
 const mockRun = vi.mocked(run);
 beforeEach(() => mockRun.mockReset());
 
