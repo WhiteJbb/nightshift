@@ -649,7 +649,7 @@ function SplitCell({ project: p, pane: x, no, selected, cols, share, span, full,
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [fitError, setFitError] = useState<string | null>(null);
   // 붙어 있는 터미널이 없으면 이 칸 크기에 맞춘다. 칸 배치(전체 화면, 칸 수에 따른 높이·폭)나 창 크기가 바뀌면 다시
-  useFitToView(viewRef, canFit, size, `${x.id}:${full}:${cols}:${share}:${span}`, () => fitSize(viewRef.current, full, share), (want) => void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError)));
+  useFitToView(canFit, size, `${x.id}:${full}:${cols}:${share}:${span}`, () => fitSize(viewRef.current, full, share), (want) => void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError)));
   const live = status === 'live';
   return (
     <div className={selected ? 'split-cell selected' : 'split-cell'} style={span > 1 ? { gridColumn: `span ${span}` } : undefined} onPointerDown={onSelect} onFocusCapture={(e) => {
@@ -768,7 +768,7 @@ export function TerminalTab({ project: p, now }: Props) {
   const canFit = t.exists && !t.attached;
   // 붙어 있는 터미널이 없으면, 터미널을 연 화면(휴대폰·컴퓨터) 크기에 pane 을 맞추고 창 크기를 바꾸면 따라간다.
   // 다른 화면에서 열면 거기에 맞춘다. 나란히 보기에서는 칸마다 맞춘다 (여기서 재면 하나씩 보기 틀이 없어 엉뚱한 크기가 된다)
-  useFitToView(viewRef, !splitOn && canFit && pane !== undefined, size, `${pane?.id}:${full}`, () => fitSize(viewRef.current, full), (want) => {
+  useFitToView(!splitOn && canFit && pane !== undefined, size, `${pane?.id}:${full}`, () => fitSize(viewRef.current, full), (want) => {
     if (pane) void api.fitPane(p.id, pane.id, want).catch((e: unknown) => quietFit(e, setFitError));
   });
 
