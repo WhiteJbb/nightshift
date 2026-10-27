@@ -5,6 +5,7 @@ import { NOT_A_REPO } from '../../shared/types.ts';
 import { AGENTS, StartSession } from './NewSession.tsx';
 import { FilesTab, useDismiss } from './Files.tsx';
 import { charWidth, fitSize, fontRange } from './termsize.ts';
+import { useFitToView } from './fitview.ts';
 import { parseAnsi } from './ansi.ts';
 import { copyText, Term, TERM_FONT, TERM_FONT_SIZE } from './Term.tsx';
 import type { TermFeed, TermStatus } from './Term.tsx';
@@ -647,18 +648,8 @@ function SplitCell({ project: p, pane: x, no, selected, cols, share, span, full,
   const [status, setStatus] = useState<TermStatus>('connecting');
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [fitError, setFitError] = useState<string | null>(null);
-  // 붙어 있는 터미널이 없으면 이 칸 크기에 맞춘다. 칸 배치(전체 화면, 칸 수에 따른 높이·폭)가 바뀌면 다시. 첫 화면이 그려진 뒤에 잰다
-  const fittedFor = useRef<string | null>(null);
-  const layoutKey = `${full}:${cols}:${share}:${span}`;
-  useEffect(() => {
-    if (!canFit || !size || fittedFor.current === layoutKey) return;
-    const timer = setTimeout(() => {
-      fittedFor.current = layoutKey;
-      const want = fitSize(viewRef.current, full, share);
-      if (want.cols !== size.cols || want.rows !== size.rows) void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [canFit, size, full, share, layoutKey, p.id, x.id]);
+  // 붙어 있는 터미널이 없으면 이 칸 크기에 맞춘다. 칸 배치(전체 화면, 칸 수에 따른 높이·폭)나 창 크기가 바뀌면 다시
+  useFitToView(viewRef, canFit, size, `${x.id}:${full}:${cols}:${share}:${span}`, () => fitSize(viewRef.current, full, share), (want) => void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError)));
   const live = status === 'live';
   return (
     <div className={selected ? 'split-cell selected' : 'split-cell'} style={span > 1 ? { gridColumn: `span ${span}` } : undefined} onPointerDown={onSelect} onFocusCapture={(e) => {
@@ -773,21 +764,13 @@ export function TerminalTab({ project: p, now }: Props) {
   const picking = picked !== null && picked.pane === pane?.id;
   // 다른 pane 으로 가면 끝낸다 (돌아왔을 때 예전 글이 새 터미널을 가리지 않게)
   if (picked && !picking) setPicked(null);
-  const autoFitted = useRef<string | null>(null);
   // 크기 맞추기는 입력 허용과 상관없다 (글자를 보내지 않는다). 다른 터미널이 붙어 있으면 그 화면까지 바뀌므로 안 한다
   const canFit = t.exists && !t.attached;
-  // 붙어 있는 터미널이 없으면, 터미널을 연 화면(휴대폰·컴퓨터) 크기에 pane 을 한 번 맞춘다. 나중에 다른 화면에서 열면 거기에 맞춘다
-  useEffect(() => {
-    // 나란히 보기에서는 칸마다 맞춘다 (여기서 재면 하나씩 보기 틀이 없어 엉뚱한 크기가 된다)
-    if (splitOn || !canFit || !pane || !size || autoFitted.current === pane.id) return;
-    // 첫 화면이 그려진 뒤에 재야 실제 칸 폭을 쓴다
-    const timer = setTimeout(() => {
-      autoFitted.current = pane.id;
-      const want = fitSize(viewRef.current, full);
-      if (want.cols !== size.cols || want.rows !== size.rows) void api.fitPane(p.id, pane.id, want).catch((e: unknown) => quietFit(e, setFitError));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [splitOn, canFit, pane, size, full, p.id]);
+  // 붙어 있는 터미널이 없으면, 터미널을 연 화면(휴대폰·컴퓨터) 크기에 pane 을 맞추고 창 크기를 바꾸면 따라간다.
+  // 다른 화면에서 열면 거기에 맞춘다. 나란히 보기에서는 칸마다 맞춘다 (여기서 재면 하나씩 보기 틀이 없어 엉뚱한 크기가 된다)
+  useFitToView(viewRef, !splitOn && canFit && pane !== undefined, size, `${pane?.id}:${full}`, () => fitSize(viewRef.current, full), (want) => {
+    if (pane) void api.fitPane(p.id, pane.id, want).catch((e: unknown) => quietFit(e, setFitError));
+  });
 
   if (!t.configured) {
     return (
@@ -987,8 +970,7 @@ export function TerminalTab({ project: p, now }: Props) {
                   className="more-rows split-toggle"
                   aria-pressed={splitOn}
                   onClick={() => {
-                    // 하나씩 보기로 돌아가면 고른 터미널을 다시 이 화면 크기에 맞춘다
-                    autoFitted.current = null;
+                    // 하나씩 보기로 돌아가면 고른 터미널을 다시 이 화면 크기에 맞춘다 (useFitToView)
                     setSplit(!splitOn);
                     try {
                       localStorage.setItem(splitKey, splitOn ? '0' : '1');
@@ -1004,12 +986,8 @@ export function TerminalTab({ project: p, now }: Props) {
                 type="button"
                 className="more-rows full-toggle"
                 aria-pressed={full}
-                onClick={() => {
-                  const next = !full;
-                  setFull(next);
-                  // 바뀐 틀이 그려진 뒤에 재서 맞춘다
-                  if (!splitOn && canFit && pane) requestAnimationFrame(() => void api.fitPane(p.id, pane.id, fitSize(viewRef.current, next)).catch((e: unknown) => setFitError(errorMessage(e))));
-                }}
+                // 바뀐 틀에 맞추는 것은 useFitToView 가 한다
+                onClick={() => setFull(!full)}
               >
                 {full ? '전체 화면 끝내기' : '전체 화면'}
               </button>
