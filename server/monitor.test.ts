@@ -650,16 +650,22 @@ describe('followRepo to a folder beside the configured one', () => {
 describe('off', () => {
   it('a session ended on purpose stays off across resets and restarts, until it comes back', async () => {
     let exists = true;
+    let createdAt = 'A';
     const cfg = parseConfig({ projects: [{ name: 'app', repoPath: '/repo/app', tmuxSession: 'app' }] }, '/base');
     const collector = fakeCollector({ output: [], git: git() });
-    collector.tmux = async () => new Map([['app', { configured: true, exists, createdAt: null, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]);
+    collector.tmux = async () => new Map([['app', { configured: true, exists, createdAt, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]);
     const m = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0 });
     const state = (x = m) => x.snapshot.projects[0]!.status.state;
     await m.tick();
-    m.setOff('app', true);
-    // 끄기 직전에 시작한 tick 은 세션이 아직 떠 있는 것을 본다. 그것으로 풀지 않는다
+    m.setOff('app', true, 'A');
+    // 끄기 직전에 시작한 tick 은 끈 그 세션이 아직 떠 있는 것을 본다. 그것으로 풀지 않는다
     await m.tick();
     expect(m.exportState().off).toEqual(['app']);
+    // 끄자마자(다음 tick 전에) 다시 켠 새 세션이면 풀린다
+    createdAt = 'B';
+    await m.tick();
+    expect(m.exportState().off).toEqual([]);
+    m.setOff('app', true, 'B');
     exists = false;
     await m.tick();
     expect(state()).toBe('off');

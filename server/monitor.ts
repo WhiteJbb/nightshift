@@ -148,10 +148,11 @@ export class Monitor {
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
   private looked = new Map<string, { cwd: string | null; beside: string | null }>();
   /**
-   * 일부러 꺼 둔 프로젝트 → 그 뒤 세션이 꺼진 것을 봤는지. 꺼진 것을 본 뒤 다시 뜨면 뺀다 (끄기 직전에 시작한 tick 이 본
-   * 옛 모습으로 풀지 않게). 새 모니터링 세션(reset)으로도 풀리지 않는다
+   * 일부러 꺼 둔 프로젝트 → 끈 세션의 생성 시각 (꺼진 것을 봤거나 이미 꺼진 것을 표시했으면 null). 그와 다른 세션이 뜨면 뺀다:
+   * 다시 켠 것이다. 끄기 직전에 시작한 tick 이 본 바로 그 세션으로는 풀지 않는다. 새 모니터링 세션(reset)으로도 풀리지 않는다.
+   * ponytail: tmux 생성 시각은 초 단위라, 끈 그 초 안에 다시 켜고 그사이 tick 이 없으면 그 세션은 꺼 둠으로 남는다 (나중에 죽어도 알리지 않는다)
    */
-  private off: Map<string, boolean>;
+  private off: Map<string, string | null>;
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -166,7 +167,7 @@ export class Monitor {
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.restore?.startedAt ?? new Date(this.now()).toISOString();
     // 저장된 것은 꺼진 것을 본 뒤다: 서버가 꺼진 사이 세션을 다시 켰으면 풀린다
-    this.off = new Map((opts.restore?.off ?? []).map((id) => [id, true]));
+    this.off = new Map((opts.restore?.off ?? []).map((id) => [id, null]));
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
@@ -227,12 +228,16 @@ export class Monitor {
 
   /**
    * 세션을 꺼 둔 것으로 표시하거나 푼다 (세션 종료 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다).
-   * gone: 이미 꺼진 세션이다 (그러면 다음 tick 전에 다시 켜도 풀린다)
+   * created: 끌 세션의 생성 시각 (이미 꺼진 세션이면 null)
    */
-  setOff(projectId: string, on: boolean, gone = false): void {
-    if (on) this.off.set(projectId, gone);
+  setOff(projectId: string, on: boolean, created: string | null = null): void {
+    if (on) this.off.set(projectId, created);
     else this.off.delete(projectId);
     this.publish();
+  }
+
+  isOff(projectId: string): boolean {
+    return this.off.has(projectId);
   }
 
   /** 새 모니터링 세션: 기준점을 버리고 지금부터 다시 센다. */
@@ -404,8 +409,8 @@ export class Monitor {
   private async collectOne(config: ProjectConfig, raw: RawTmux, nowIso: string): Promise<Collected> {
     const { project: p, git } = await this.followRepo(config, raw);
     if (this.off.has(p.id)) {
-      if (!raw.exists) this.off.set(p.id, true);
-      else if (this.off.get(p.id)) this.off.delete(p.id);
+      if (!raw.exists) this.off.set(p.id, null);
+      else if (raw.createdAt !== this.off.get(p.id)) this.off.delete(p.id);
     }
     let tr = this.tracked.get(p.id);
     if (!tr || tr.repoPath !== p.repoPath) this.tracked.set(p.id, (tr = newTracked(p.repoPath)));

@@ -26,13 +26,14 @@ afterAll(() => void server.close());
 describe('ending a session', () => {
   it('marks it off before killing it, undoes that if the kill fails, and marks a session closed elsewhere', async () => {
     let exists = true;
+    let createdAt = 'A';
     let fail: string | null = null;
     const offAtKill: boolean[] = [];
     const cfg = parseConfig({ host: '127.0.0.1', projects: [{ name: 's', repoPath: '/repo/s', tmuxSession: 's' }] }, '/base');
     const demo = demoCollector();
     const m = new Monitor({
       config: cfg,
-      collector: { ...demo, tmux: async () => new Map([['s', { configured: true, exists, createdAt: null, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]) },
+      collector: { ...demo, tmux: async () => new Map([['s', { configured: true, exists, createdAt, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]) },
       runs: runner.get,
     });
     const killSession = async () => {
@@ -52,6 +53,11 @@ describe('ending a session', () => {
       expect((await fetch(`${url}/session`, { method: 'DELETE' })).status).toBe(200);
       expect(offAtKill).toEqual([true, true]);
       expect(m.snapshot.projects[0]!.status.state).toBe('off');
+      // 한 번 더 눌러 실패해도(이미 없는 세션) 꺼 둔 것을 되돌리지 않는다
+      fail = "can't find session: s";
+      expect((await fetch(`${url}/session`, { method: 'DELETE' })).status).toBe(400);
+      expect(m.snapshot.projects[0]!.status.state).toBe('off');
+      fail = null;
 
       // 터미널에서 끈 세션: 오류로 뜬 것을 꺼 둠으로 돌린다. 돌고 있는 세션은 이렇게 끄지 않는다
       m.setOff('s', false);
