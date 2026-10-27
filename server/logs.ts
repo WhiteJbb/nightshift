@@ -64,6 +64,20 @@ export function waitingOnBackground(lines: string[]): boolean {
   return WAITING_RE.test(above.slice(above.findLastIndex((l) => /^\S/.test(l))).map((l) => l.trim()).join(' '));
 }
 /**
+ * 화면의 절대경로("/…/dir/이름/…", "'~/…/dir/이름'")에 나온 dir 바로 아래 이름들. 많이 나온 것부터, 같으면 나중에 나온 것부터.
+ * dirs 는 한 폴더의 여러 이름이다 (링크와 실제 경로). 이름에 빈칸·괄호가 있어도 되게 "/"·따옴표로 끝난 것만 센다 ("…"로 잘린 경로는 빠진다)
+ */
+export function mentionedIn(lines: string[], dirs: string[], home: string): string[] {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const forms = dirs.flatMap((d) => [esc(d), ...(d.startsWith(`${home}/`) ? [`~${esc(d.slice(home.length))}`] : [])]);
+  // 경로의 시작이어야 한다 ("/Volumes/backup/Users/…" 처럼 다른 경로 안에 든 것은 아니다)
+  const re = new RegExp(`(?<=^|[\\s'"(\\[=:,])(?:${forms.join('|')})/([^/'"]+)[/'"]`, 'g');
+  const seen = new Map<string, { n: number; at: number }>();
+  let at = 0;
+  for (const line of lines) for (const m of line.matchAll(re)) seen.set(m[1]!, { n: (seen.get(m[1]!)?.n ?? 0) + 1, at: at++ });
+  return [...seen].sort(([, a], [, b]) => b.n - a.n || b.at - a.at).map(([name]) => name);
+}
+/**
  * 화면 마지막 몇 줄에 "작업 중" 표시(busyPatterns)가 있는지. 상태 줄은 맨 아래에 있으니 본문 인용에는 잘 걸리지 않는다.
  * changed: 지난번 본 뒤로 화면 글이 바뀌었는지 (표시가 통째로 빠진 좁은 화면에서만 쓴다)
  */

@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { GitBaseline, GitInfo, ProjectSnapshot, RunKind, RunResult, RunSummary, SinceBaseline, Snapshot, TmuxInfo } from '../shared/types.ts';
@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, findPrompt, isBusy, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
+import { aboveInput, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -145,6 +145,8 @@ export class Monitor {
   private tracked = new Map<string, Tracked>();
   /** 프로젝트마다 지난 tick 에 본, 에이전트가 돌리던 프로세스들과 그때의 저장소 (followRepo) */
   private workSeen = new Map<string, Map<number, string | null>>();
+  /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
+  private looked = new Map<string, { cwd: string | null; beside: string | null }>();
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -162,6 +164,7 @@ export class Monitor {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
       if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, busyAt: saved.busyAt ?? null });
+      if (saved?.looked) this.looked.set(p.id, saved.looked);
     }
     this.snapshot = this.build();
   }
@@ -184,6 +187,7 @@ export class Monitor {
         if (keep.get(id) !== old.get(id)) {
           this.tracked.delete(id);
           this.collected.delete(id);
+          this.looked.delete(id);
         }
       }
       this.opts = { ...this.opts, config, collector, configMissing };
@@ -209,7 +213,7 @@ export class Monitor {
     const tracked: MonitorState['tracked'] = {};
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
     return { startedAt: this.startedAt, tracked };
   }
@@ -218,6 +222,7 @@ export class Monitor {
   reset(): Promise<void> {
     return this.serial(async () => {
       this.tracked.clear();
+      this.looked.clear();
       this.startedAt = new Date(this.now()).toISOString();
       await this.collectAll();
     });
@@ -254,6 +259,7 @@ export class Monitor {
       if (!projects.some((p) => p.id === id)) {
         this.tracked.delete(id);
         this.collected.delete(id);
+        this.looked.delete(id);
       }
     }
     let tmuxError: string | undefined;
@@ -287,31 +293,69 @@ export class Monitor {
    * 저장소가 아닌 경로로 등록된 프로젝트는 pane 이 Git 저장소 안으로 cd 하면 그 저장소를 따라간다 (config 는 바꾸지 않는다).
    * 홈 폴더(나 그 위)로 등록된 세션은 에이전트를 홈에서 띄운 것이라, 에이전트가 명령을 돌리는 폴더(Codex 의 workdir 등)의 저장소도 따라간다.
    * 한 번 따라간 저장소는 pane 이 다른 곳으로 가도 저장소인 동안 유지하고, 에이전트가 다른 저장소에서 일하기 시작하면 그리로 옮긴다.
+   * 홈 밖의 폴더로 등록한 프로젝트는 에이전트가 옆 폴더(같은 상위 폴더 안: 과제2 → 과제3 등)로 옮겨 가 일하는 것도, 저장소가 아니어도 따라간다.
+   * 홈에서 띄운 에이전트가 절대경로로만 다루면 명령의 작업 폴더로는 알 수 없어서, 화면의 경로에 가장 많이 나온 옆 폴더를 본다.
    */
   private async followRepo(p: ProjectConfig, raw: RawTmux): Promise<{ project: ProjectConfig; git: GitInfo }> {
     const git = await this.opts.collector.git(p);
     if (git.ok || git.error !== NOT_A_REPO) return { project: p, git };
-    const cwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
+    const paneCwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
     const followed = this.tracked.get(p.id)?.repoPath;
     // 홈이 링크일 수 있다 (설정 경로는 실제 폴더로 적었을 수 있다)
     const real = (dir: string) => realpath(dir).catch(() => dir);
-    const [where, home] = await Promise.all([real(p.repoPath), real(homedir())]);
+    const parent = path.dirname(p.repoPath);
+    const [where, home, up] = await Promise.all([real(p.repoPath), real(homedir()), real(parent)]);
+    // 상위 폴더가 링크면 tmux 는 실제 경로를 알려 준다: 옆 폴더는 설정 경로의 이름으로 맞춘다
+    const cwd = paneCwd && path.dirname(paneCwd) === up ? path.join(parent, path.basename(paneCwd)) : paneCwd;
     const fromHome = !path.relative(where, home).startsWith('..');
     const procs = fromHome && raw.exists && p.tmuxSession && this.opts.collector.workDirs ? await this.opts.collector.workDirs(p.tmuxSession) : null;
+    // 홈(이나 그 위)의 바로 아래는 옆 폴더로 보지 않는다 (~/.venvs, ~/repos 같은 것이라 프로젝트가 아니다)
+    // ponytail: 옆 폴더만 본다. 멀리 떨어진, 저장소 아닌 폴더는 어디까지가 프로젝트인지 알 수 없다
+    const nearby = !fromHome && path.relative(up, home).startsWith('..');
+    const sibling = (dir: string) => nearby && path.dirname(dir) === parent;
+    const before = this.looked.get(p.id);
+    // 화면을 못 읽었거나 위로 올려 보는 중이면 지난번 본 것을 그대로 둔다 (내려왔을 때 그대로인 화면을 새 일로 보지 않게)
+    const readable = raw.output.length > 0 && !scrolledUp(raw.output);
+    let beside = nearby && !readable ? (before?.beside ?? null) : null;
+    if (nearby && readable) {
+      // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)
+      const above = aboveInput(raw.output);
+      const typing = above.findLastIndex((l) => /^›(?: |$)/.test(l));
+      for (const name of mentionedIn(typing < 0 ? above : above.slice(0, typing), [...new Set([parent, up])], homedir())) {
+        const dir = path.join(parent, name);
+        if ((await stat(dir).catch(() => null))?.isDirectory()) {
+          beside = dir;
+          break;
+        }
+      }
+    }
     // 같은 저장소의 하위 폴더들은 맨 위로 모은다 (폴더마다 다른 프로젝트로 보면 추적 기록이 매번 새로 시작된다)
     const roots = new Map<string, string | null>();
-    for (const dir of new Set([cwd, followed, ...(procs ?? []).map((x) => x.dir)])) {
+    for (const dir of new Set([cwd, beside, followed, ...(procs ?? []).map((x) => x.dir)])) {
       if (dir) roots.set(dir, this.opts.collector.repoRoot ? await this.opts.collector.repoRoot(dir) : dir);
     }
     const fresh = procs ? this.freshWork(p, procs, followed, (dir) => roots.get(dir) ?? null) : [];
+    // 옆 폴더는 pane 이 cd 로 옮겨 가거나 화면에 가장 많이 나온 옆 폴더가 바뀐 때만 본다: 옛 경로가 화면에 남아 있거나
+    // pane 이 에이전트를 띄운 폴더에 그대로 있어도, 그 뒤에 따라간 곳을 되돌리지 않는다. pane 이 저장소 안에 있으면 그 저장소다 (위와 같다).
+    // 처음 볼 때는 둘 다 보되 화면이 먼저다 (에이전트를 등록한 폴더에서 띄우고 옆 폴더에서 일할 수 있다)
+    const seen = { cwd: cwd ?? before?.cwd ?? null, beside };
+    this.looked.set(p.id, seen);
+    const inRepo = !!(cwd && roots.get(cwd));
+    const changed = inRepo ? [] : before ? [seen.cwd !== before.cwd ? cwd : null, beside !== before.beside ? beside : null] : [beside, cwd];
     const tried = new Set<string>();
-    for (const dir of new Set([cwd, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
-      const root = dir ? roots.get(dir) : null;
-      if (!root || root === p.repoPath || tried.has(root)) continue;
+    for (const dir of new Set([...changed, inRepo ? cwd : undefined, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
+      const root = dir ? (roots.get(dir) ?? (sibling(dir) ? dir : null)) : null;
+      if (!root || tried.has(root)) continue;
+      if (root === p.repoPath) {
+        // 등록한 폴더로 cd 했거나 그 폴더가 가장 많이 나오게 됐으면 돌아온다
+        if (changed.includes(dir)) break;
+        continue;
+      }
       tried.add(root);
       const project = { ...p, repoPath: root };
       const found = await this.opts.collector.git(project);
-      if (found.ok) return { project, git: found };
+      // 옆 폴더는 저장소가 아니어도, git 을 잠깐 못 읽어도(시간 초과 등) 있는 동안 따라간다 (다음에 다시 찾을 신호가 없다)
+      if (found.ok || (sibling(root) && (await stat(root).catch(() => null))?.isDirectory())) return { project, git: found };
     }
     return { project: p, git };
   }
