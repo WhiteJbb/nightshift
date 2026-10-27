@@ -1,6 +1,6 @@
 import { readlink } from 'node:fs/promises';
 import type { TmuxPane } from '../shared/types.ts';
-import { run } from './exec.ts';
+import { run, runQueued } from './exec.ts';
 import { keepSgr, stripAnsi } from './logs.ts';
 
 export interface TmuxSession {
@@ -201,7 +201,7 @@ export function cleanOutput(out: string, limit = OUTPUT_LINES): string[] {
 export async function capturePane(pane: Pick<PaneMeta, 'id' | 'height'>, lines = OUTPUT_LINES): Promise<string[]> {
   // 스크롤백 + 화면을 합쳐 lines 줄이 되게 시작 줄을 잡는다 (화면이 더 크면 화면 아래쪽만).
   const start = pane.height - lines;
-  const r = await run('tmux', ['-u', 'capture-pane', '-p', '-e', '-J', '-t', pane.id, '-S', String(start)]);
+  const r = await runQueued('tmux', ['-u', 'capture-pane', '-p', '-e', '-J', '-t', pane.id, '-S', String(start)]);
   return r.code === 0 ? cleanOutput(r.stdout, lines) : [];
 }
 

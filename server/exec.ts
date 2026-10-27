@@ -51,6 +51,26 @@ export function run(bin: Bin, args: string[], timeoutMs = 10_000): Promise<ExecR
 }
 
 /**
+ * 감시처럼 한꺼번에 많이 띄우는 명령은 몇 개씩만 띄운다. 프로세스를 띄우는 동안(맥에서 하나에 ~3ms) 메인 스레드가 멈춰서,
+ * 저장소 10개의 git 을 한꺼번에 띄우면 그동안 터미널에 친 키가 수백 ms 밀린다. 키 입력(send-keys)은 이 줄을 서지 않는다
+ */
+const MAX_QUEUED = 4;
+let queued = 0;
+const waiting: (() => void)[] = [];
+export async function runQueued(bin: Bin, args: string[], timeoutMs?: number): Promise<ExecResult> {
+  // 끝난 쪽이 자리를 바로 넘겨준다 (그 사이 새로 온 것이 끼어들어 MAX_QUEUED 를 넘지 않게)
+  if (queued >= MAX_QUEUED) await new Promise<void>((r) => waiting.push(r));
+  else queued++;
+  try {
+    return await run(bin, args, timeoutMs);
+  } finally {
+    const next = waiting.shift();
+    if (next) next();
+    else queued--;
+  }
+}
+
+/**
  * macOS 알림. 문자열은 AppleScript 소스에 끼워 넣지 않고 argv 로 넘기므로 escaping 이 필요 없다.
  * macOS 가 아니면 아무것도 하지 않는다.
  */
