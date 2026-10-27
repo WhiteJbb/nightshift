@@ -643,7 +643,8 @@ describe('followRepo to a folder beside the configured one', () => {
       process.env.HOME = was;
       rmSync(home, { recursive: true });
     }
-  });
+    // 실제 git 을 여러 번 돌린다 (혼자서도 2~3초. 전체를 같이 돌리면 기본 5초를 넘기도 한다)
+  }, 20_000);
 });
 
 describe('discover', () => {
