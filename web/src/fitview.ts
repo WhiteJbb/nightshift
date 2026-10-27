@@ -30,8 +30,18 @@ export function useFitToView(view: RefObject<HTMLElement | null>, on: boolean, s
       }, 300);
     };
     check();
+    // 영역의 폭(사이드바·칸 배치)만 본다. 높이는 내용을 따라 바뀌어서(다른 화면이 맞춘 줄 수, 바가 줄바꿈되어 밀림) 그것으로 맞추면
+    // 다른 화면의 크기를 되돌린다. 창 높이는 resize 이벤트로 본다
     const el = view.current;
-    const ro = el && typeof ResizeObserver === 'function' ? new ResizeObserver(check) : null;
+    let width = el?.clientWidth;
+    const ro =
+      el && typeof ResizeObserver === 'function'
+        ? new ResizeObserver(() => {
+            if (el.clientWidth === width) return;
+            width = el.clientWidth;
+            check();
+          })
+        : null;
     if (el) ro?.observe(el);
     window.addEventListener('resize', check);
     return () => {

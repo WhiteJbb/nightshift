@@ -16,7 +16,22 @@ function View({ on, size, k, measure, fit }: { on: boolean; size: TermSize | nul
   return <div ref={ref} />;
 }
 
-test('fits once drawn, follows window resizes, and leaves alone a size another screen set', async () => {
+// jsdom 에는 ResizeObserver 와 레이아웃이 없다. 알림을 직접 보내고, 폭은 clientWidth 로 정한다
+let width = 600;
+const observed: (() => void)[] = [];
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    constructor(cb: () => void) {
+      observed.push(cb);
+    }
+    observe() {}
+    disconnect() {}
+  },
+);
+Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => width });
+
+test('fits once drawn, follows window resizes and width changes, and leaves alone a size another screen set', async () => {
   vi.useFakeTimers();
   let area = { cols: 150, rows: 40 };
   const fit = vi.fn();
@@ -44,9 +59,20 @@ test('fits once drawn, follows window resizes, and leaves alone a size another s
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(fit).toHaveBeenCalledTimes(2);
 
+  // 영역의 높이만 바뀐 것(내용이 바뀜)으로는 맞추지 않고, 폭이 바뀌면(사이드바·칸 배치) 맞춘다
+  area = { cols: 200, rows: 55 };
+  observed.forEach((cb) => cb());
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(fit).toHaveBeenCalledTimes(2);
+  width = 900;
+  observed.forEach((cb) => cb());
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(fit).toHaveBeenCalledTimes(3);
+  expect(fit).toHaveBeenLastCalledWith({ cols: 200, rows: 55 });
+
   // 꺼졌다 켜지면(나란히 보기에서 돌아옴) 처음처럼 다시 맞춘다
   rerender(<View {...props} on={false} size={{ cols: 50, rows: 30 }} />);
   rerender(<View {...props} size={{ cols: 50, rows: 30 }} />);
   await act(() => vi.advanceTimersByTimeAsync(500));
-  expect(fit).toHaveBeenCalledTimes(3);
+  expect(fit).toHaveBeenCalledTimes(4);
 });
