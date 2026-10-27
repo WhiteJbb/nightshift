@@ -28,8 +28,8 @@ export interface TrackedState {
 export interface MonitorState {
   startedAt: string;
   tracked: Record<string, TrackedState>;
-  /** 꺼 둔 프로젝트 id (예전 파일에는 없다) */
-  off?: string[];
+  /** 꺼 둔 프로젝트 id → 그때 보던 tmux 세션 이름 (예전 파일에는 없다) */
+  off?: Record<string, string>;
 }
 
 /** 서버를 재시작해도 밤샘 기록이 이어지도록 디스크에 남기는 상태 */

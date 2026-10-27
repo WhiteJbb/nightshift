@@ -25,10 +25,10 @@ afterAll(() => void server.close());
 
 describe('ending a session', () => {
   // 두 프로젝트(s, t)가 한 tmux 세션 s 를 본다
-  async function setup(killSession: (sess: { exists: boolean }) => Promise<string | null>) {
-    const sess = { exists: true };
+  async function setup(killSession: (sess: { exists: boolean; created: string }) => Promise<string | null>) {
+    const sess = { exists: true, created: 'A' };
     const cfg = parseConfig({ host: '127.0.0.1', projects: [{ name: 's', repoPath: '/repo/s', tmuxSession: 's' }, { name: 't', repoPath: '/repo/t', tmuxSession: 's' }] }, '/base');
-    const raw = () => ({ configured: true, exists: sess.exists, createdAt: 'A', attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' });
+    const raw = () => ({ configured: true, exists: sess.exists, createdAt: sess.created, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' });
     const m = new Monitor({ config: cfg, collector: { ...demoCollector(), tmux: async () => new Map([['s', raw()], ['t', raw()]]) }, runs: runner.get });
     const app = createApp({ config: cfg, monitor: m, runner, terminal: { killSession: () => killSession(sess) } as never }).listen(0, '127.0.0.1');
     await Promise.all([m.tick(), new Promise((r) => app.once('listening', r))]);
@@ -40,8 +40,9 @@ describe('ending a session', () => {
   it('marks every project on the session off before killing it, undoes that if the kill fails, and marks a session closed elsewhere', async () => {
     let fail: string | null = null;
     const offAtKill: string[][] = [];
+    const offIds = () => Object.keys(t.m.exportState().off ?? {});
     const t = await setup(async (sess) => {
-      offAtKill.push(t.m.exportState().off ?? []);
+      offAtKill.push(offIds());
       if (fail) return fail;
       sess.exists = false;
       return null;
@@ -49,7 +50,7 @@ describe('ending a session', () => {
     try {
       fail = 'tmux kill-session 실패';
       expect((await fetch(`${t.url}/session`, { method: 'DELETE' })).status).toBe(400);
-      expect(t.m.exportState().off).toEqual([]);
+      expect(offIds()).toEqual([]);
       fail = null;
       expect((await fetch(`${t.url}/session`, { method: 'DELETE' })).status).toBe(200);
       expect(offAtKill).toEqual([['s', 't'], ['s', 't']]);
@@ -60,9 +61,11 @@ describe('ending a session', () => {
       expect(t.states()).toEqual(['off', 'off']);
       fail = null;
 
-      // 터미널에서 끈 세션: 오류로 뜬 것을 꺼 둠으로 돌린다. 돌고 있는 세션은 이렇게 끄지 않는다
-      t.m.setOff('s', false);
-      t.m.setOff('t', false);
+      // 다시 켰다가 터미널에서 끈 세션: 오류로 뜬 것을 꺼 둠으로 돌린다. 돌고 있는 세션은 이렇게 끄지 않는다
+      t.sess.exists = true;
+      t.sess.created = 'B';
+      await t.m.tick();
+      t.sess.exists = false;
       await t.m.tick();
       expect(t.states()).toEqual(['error', 'error']);
       expect((await fetch(`${t.url}/off`, { method: 'POST' })).status).toBe(200);
@@ -70,7 +73,7 @@ describe('ending a session', () => {
       // 다음 tick 전에 다시 켜도 풀린다 (이미 꺼진 것을 알고 있다). 그 뒤에 저절로 꺼지면 오류다
       t.sess.exists = true;
       await t.m.tick();
-      expect(t.m.exportState().off).toEqual([]);
+      expect(offIds()).toEqual([]);
       expect((await fetch(`${t.url}/off`, { method: 'POST' })).status).toBe(409);
       t.sess.exists = false;
       await t.m.tick();

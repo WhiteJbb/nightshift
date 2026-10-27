@@ -148,11 +148,11 @@ export class Monitor {
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
   private looked = new Map<string, { cwd: string | null; beside: string | null }>();
   /**
-   * 일부러 꺼 둔 프로젝트 → 끈 세션의 생성 시각 (꺼진 것을 봤거나 이미 꺼진 것을 표시했으면 null). 그와 다른 세션이 뜨면 뺀다:
-   * 다시 켠 것이다. 끄기 직전에 시작한 tick 이 본 바로 그 세션으로는 풀지 않는다. 새 모니터링 세션(reset)으로도 풀리지 않는다.
+   * 일부러 꺼 둔 프로젝트 → 끈 tmux 세션의 이름과 생성 시각 (꺼진 것을 봤거나 이미 꺼진 것을 표시했으면 created 는 null).
+   * 생성 시각이 다른 세션이 뜨면 다시 켠 것이라 뺀다. 프로젝트가 보는 세션 이름이 바뀌어도 뺀다. 새 모니터링 세션(reset)으로도 풀리지 않는다.
    * ponytail: tmux 생성 시각은 초 단위라, 끈 그 초 안에 다시 켜고 그사이 tick 이 없으면 그 세션은 꺼 둠으로 남는다 (나중에 죽어도 알리지 않는다)
    */
-  private off: Map<string, string | null>;
+  private off: Map<string, { session: string; created: string | null }>;
   /** 설정에 없지만 떠 있는 tmux 세션에서 만든 임시 프로젝트. 세션이 사라지면 같이 사라진다. */
   private discovered: ProjectConfig[] = [];
   private collected = new Map<string, Collected>();
@@ -167,7 +167,7 @@ export class Monitor {
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.restore?.startedAt ?? new Date(this.now()).toISOString();
     // 저장된 것은 꺼진 것을 본 뒤다: 서버가 꺼진 사이 세션을 다시 켰으면 풀린다
-    this.off = new Map((opts.restore?.off ?? []).map((id) => [id, null]));
+    this.off = new Map(Object.entries(opts.restore?.off ?? {}).map(([id, session]) => [id, { session, created: null }]));
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
@@ -223,21 +223,31 @@ export class Monitor {
       const tr = this.tracked.get(p.id);
       if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
-    return { startedAt: this.startedAt, tracked, off: [...this.off.keys()] };
+    return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
 
   /**
-   * 세션을 꺼 둔 것으로 표시하거나 푼다 (세션 종료 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다).
-   * created: 끌 세션의 생성 시각 (이미 꺼진 세션이면 null)
+   * 세션을 끈다. 같은 세션을 보는 프로젝트를 모두 꺼 둠으로 표시하고 나서 kill 을 부른다 (실패하면 이번에 표시한 것만 되돌린다).
+   * 수집과 한 줄로 세워, 끄기 전에 시작한 수집이 본 옛 세션으로 표시를 지우거나 그 사이 오류로 알리지 못하게 한다. 실패하면 오류 메시지
    */
-  setOff(projectId: string, on: boolean, created: string | null = null): void {
-    if (on) this.off.set(projectId, created);
-    else this.off.delete(projectId);
-    this.publish();
+  async endSession(session: string, kill: () => Promise<string | null>): Promise<string | null> {
+    let error: string | null = null;
+    await this.serial(async () => {
+      const ids = this.opts.config.projects.filter((p) => p.tmuxSession === session).map((p) => p.id);
+      const created = ids.map((id) => this.collected.get(id)?.tmux.createdAt).find(Boolean) ?? null;
+      const fresh = ids.filter((id) => !this.off.has(id));
+      for (const id of ids) this.off.set(id, { session, created });
+      error = await kill();
+      if (error) for (const id of fresh) this.off.delete(id);
+      await this.collectAll();
+    });
+    return error;
   }
 
-  isOff(projectId: string): boolean {
-    return this.off.has(projectId);
+  /** 대시보드 밖에서(터미널에서 exit 등) 끈 세션을 꺼 둠으로 표시한다 (같은 세션을 보는 프로젝트 모두) */
+  markOff(session: string): void {
+    for (const p of this.opts.config.projects) if (p.tmuxSession === session) this.off.set(p.id, { session, created: null });
+    this.publish();
   }
 
   /** 새 모니터링 세션: 기준점을 버리고 지금부터 다시 센다. */
@@ -284,7 +294,7 @@ export class Monitor {
         this.looked.delete(id);
       }
     }
-    for (const id of this.off.keys()) if (!projects.some((p) => p.id === id)) this.off.delete(id);
+    for (const [id, o] of this.off) if (!config.projects.some((p) => p.id === id && p.tmuxSession === o.session)) this.off.delete(id);
     let tmuxError: string | undefined;
     const tmuxAll = await collector.tmux(projects).catch((e: Error) => {
       tmuxError = `tmux 수집 실패: ${e.message}`;
@@ -408,9 +418,10 @@ export class Monitor {
 
   private async collectOne(config: ProjectConfig, raw: RawTmux, nowIso: string): Promise<Collected> {
     const { project: p, git } = await this.followRepo(config, raw);
-    if (this.off.has(p.id)) {
-      if (!raw.exists) this.off.set(p.id, null);
-      else if (raw.createdAt !== this.off.get(p.id)) this.off.delete(p.id);
+    const off = this.off.get(p.id);
+    if (off) {
+      if (!raw.exists) off.created = null;
+      else if (raw.createdAt !== off.created) this.off.delete(p.id);
     }
     let tr = this.tracked.get(p.id);
     if (!tr || tr.repoPath !== p.repoPath) this.tracked.set(p.id, (tr = newTracked(p.repoPath)));
