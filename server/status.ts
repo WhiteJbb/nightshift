@@ -10,6 +10,8 @@ export interface StatusInput {
   runs: Record<RunKind, RunResult | null>;
   thresholds: Thresholds;
   sessionExitIsError: boolean;
+  /** 일부러 꺼 둔 세션인지 */
+  off?: boolean;
   now: number;
 }
 
@@ -31,8 +33,10 @@ function runFailure(label: string, r: RunResult | null): string | null {
   return null;
 }
 
-/** 우선순위: 오류 > 입력 대기 > 정지 의심 > 유휴 > 정상. */
+/** 우선순위: 꺼 둠 > 오류 > 입력 대기 > 정지 의심 > 유휴 > 정상. */
 export function judge(i: StatusInput): ProjectStatus {
+  // 오래 안 쓸 세션을 꺼 둔 것은 오류가 아니다. 꺼 둔 동안은 다른 문제도 알리지 않는다
+  if (i.off && i.tmux.configured && !i.tmux.exists) return { state: 'off', reasons: ['일부러 꺼 둔 세션 · 다시 시작하면 이어서 지켜봅니다'] };
   const errors: string[] = [];
   // 저장소가 아닌 디렉터리는 설정 실수가 아니라 Git 없이 세션만 보는 것일 수 있다.
   if (!i.git.ok && i.git.error !== NOT_A_REPO) errors.push(i.git.error ?? 'Git 정보를 가져올 수 없습니다');

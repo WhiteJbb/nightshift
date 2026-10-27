@@ -647,6 +647,35 @@ describe('followRepo to a folder beside the configured one', () => {
   }, 20_000);
 });
 
+describe('off', () => {
+  it('a session ended on purpose stays off across resets and restarts, until it comes back', async () => {
+    let exists = true;
+    const cfg = parseConfig({ projects: [{ name: 'app', repoPath: '/repo/app', tmuxSession: 'app' }] }, '/base');
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists, createdAt: null, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0 });
+    const state = (x = m) => x.snapshot.projects[0]!.status.state;
+    await m.tick();
+    m.setOff('app', true);
+    exists = false;
+    await m.tick();
+    expect(state()).toBe('off');
+    expect(m.snapshot.summary.off).toBe(1);
+    await m.reset();
+    expect(state()).toBe('off');
+    const again = new Monitor({ config: cfg, collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
+    await again.tick();
+    expect(state(again)).toBe('off');
+    // 다시 켜면 풀리고, 그 뒤에 저절로 꺼지면 오류다
+    exists = true;
+    await again.tick();
+    expect(state(again)).not.toBe('off');
+    exists = false;
+    await again.tick();
+    expect(state(again)).toBe('error');
+  });
+});
+
 describe('discover', () => {
   it('shows unconfigured tmux sessions as temporary projects and drops them when they close', async () => {
     let found = [{ name: 'app', cwd: '/repo/app' }, { name: 'scratch', cwd: '/tmp/scratch' }];

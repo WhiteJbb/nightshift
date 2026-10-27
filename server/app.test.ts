@@ -23,6 +23,51 @@ beforeAll(async () => {
 });
 afterAll(() => void server.close());
 
+describe('ending a session', () => {
+  it('marks it off before killing it, undoes that if the kill fails, and marks a session closed elsewhere', async () => {
+    let exists = true;
+    let fail: string | null = null;
+    const offAtKill: boolean[] = [];
+    const cfg = parseConfig({ host: '127.0.0.1', projects: [{ name: 's', repoPath: '/repo/s', tmuxSession: 's' }] }, '/base');
+    const demo = demoCollector();
+    const m = new Monitor({
+      config: cfg,
+      collector: { ...demo, tmux: async () => new Map([['s', { configured: true, exists, createdAt: null, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]) },
+      runs: runner.get,
+    });
+    const killSession = async () => {
+      offAtKill.push(m.exportState().off?.includes('s') ?? false);
+      if (fail) return fail;
+      exists = false;
+      return null;
+    };
+    const app = createApp({ config: cfg, monitor: m, runner, terminal: { killSession } as never }).listen(0, '127.0.0.1');
+    try {
+      await Promise.all([m.tick(), new Promise((r) => app.once('listening', r))]);
+      const url = `http://127.0.0.1:${(app.address() as AddressInfo).port}/api/projects/s`;
+      fail = 'tmux kill-session 실패';
+      expect((await fetch(`${url}/session`, { method: 'DELETE' })).status).toBe(400);
+      expect(m.exportState().off).toEqual([]);
+      fail = null;
+      expect((await fetch(`${url}/session`, { method: 'DELETE' })).status).toBe(200);
+      expect(offAtKill).toEqual([true, true]);
+      expect(m.snapshot.projects[0]!.status.state).toBe('off');
+
+      // 터미널에서 끈 세션: 오류로 뜬 것을 꺼 둠으로 돌린다. 돌고 있는 세션은 이렇게 끄지 않는다
+      m.setOff('s', false);
+      await m.tick();
+      expect(m.snapshot.projects[0]!.status.state).toBe('error');
+      expect((await fetch(`${url}/off`, { method: 'POST' })).status).toBe(200);
+      expect(m.snapshot.projects[0]!.status.state).toBe('off');
+      exists = true;
+      await m.tick();
+      expect((await fetch(`${url}/off`, { method: 'POST' })).status).toBe(409);
+    } finally {
+      app.close();
+    }
+  });
+});
+
 describe('API', () => {
   it('serves the snapshot', async () => {
     const s = await (await fetch(`${base}/api/snapshot`)).json();

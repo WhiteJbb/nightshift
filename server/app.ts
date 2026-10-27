@@ -404,9 +404,26 @@ export function createApp({ config, monitor, runner, configEditor, terminal, tes
     const blocked = sessionBlocked();
     if (blocked || !terminal) return void res.status(403).json({ error: blocked });
     if (!project.tmuxSession) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
+    // 일부러 끈 세션은 오류가 아니라 꺼 둠이다. 끄기 전에 표시해야 그 사이 tick 이 오류로 알리지 않는다
+    monitor.setOff(project.id, true);
     const error = await terminal.killSession(project.tmuxSession);
-    if (error) return void res.status(400).json({ error });
+    if (error) {
+      monitor.setOff(project.id, false);
+      return void res.status(400).json({ error });
+    }
     await monitor.tick();
+    res.json({ ok: true });
+  });
+
+  // 대시보드 밖에서(터미널에서 exit 등) 끈 세션을 꺼 둠으로 표시한다. 세션을 다시 시작하면 풀린다
+  api.post('/projects/:id/off', (req, res) => {
+    const project = monitor.snapshot.projects.find((p) => p.id === req.params.id);
+    if (!project || !monitor.config.projects.some((p) => p.id === project.id)) return void res.status(404).json({ error: '프로젝트를 찾을 수 없습니다' });
+    const blocked = sessionBlocked();
+    if (blocked) return void res.status(403).json({ error: blocked });
+    if (!project.tmuxSession) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
+    if (project.tmux.exists) return void res.status(409).json({ error: '세션이 돌고 있습니다. 끄려면 세션 종료를 누르세요' });
+    monitor.setOff(project.id, true);
     res.json({ ok: true });
   });
 

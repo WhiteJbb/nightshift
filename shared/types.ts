@@ -1,7 +1,8 @@
 // 서버와 UI가 공유하는 API 타입. 런타임 코드 없음 (type-only import 전용).
 
 /** waiting = 에이전트가 사용자 입력(확인 프롬프트 등)을 기다리는 중 */
-export type ProjectState = 'running' | 'waiting' | 'idle' | 'stalled' | 'error';
+/** off: 일부러 꺼 둔 세션 (대시보드에서 세션 종료, 또는 꺼진 세션을 꺼 둠으로 표시). 세션이 다시 뜨면 풀린다 */
+export type ProjectState = 'running' | 'waiting' | 'idle' | 'stalled' | 'error' | 'off';
 export type RunKind = 'test' | 'build';
 
 export interface Commit {
@@ -183,6 +184,7 @@ export interface Summary {
   idle: number;
   stalled: number;
   error: number;
+  off: number;
 }
 
 export interface Snapshot {

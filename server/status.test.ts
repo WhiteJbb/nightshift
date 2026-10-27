@@ -62,6 +62,13 @@ describe('judge', () => {
     expect(judge(input({ tmux: gone, sessionExitIsError: false })).state).toBe('running');
   });
 
+  it('off, not an error, when the session was ended on purpose; other problems wait until it is back', () => {
+    const gone = { ...tmux, exists: false, lastOutputChangeAt: null };
+    expect(judge(input({ tmux: gone, off: true }))).toEqual({ state: 'off', reasons: ['일부러 꺼 둔 세션 · 다시 시작하면 이어서 지켜봅니다'] });
+    expect(judge(input({ tmux: gone, off: true, logErrors: ['boom'] })).state).toBe('off');
+    expect(judge(input({ tmux, off: true })).state).toBe('running');
+  });
+
   it('error on git failure, log errors, failed or timed out runs', () => {
     expect(judge(input({ git: { ...git, ok: false, error: '저장소 경로가 존재하지 않습니다' } }))).toEqual({ state: 'error', reasons: ['저장소 경로가 존재하지 않습니다'] });
     expect(judge(input({ logErrors: ['Error: boom'] })).state).toBe('error');

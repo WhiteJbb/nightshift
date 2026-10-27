@@ -61,6 +61,7 @@ export const api = {
   saveFile: (id: string, body: { path: string; content: string; version: string }) => req<{ version: string }>(`/api/projects/${encodeURIComponent(id)}/file`, 'PUT', body),
   fsOp: (id: string, body: { op: FsOp; path: string; to?: string }) => req<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}/fs`, 'POST', body),
   closePane: (id: string, paneId: string) => req<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}/panes/${encodeURIComponent(paneId)}`, 'DELETE'),
+  markOff: (id: string) => req<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}/off`, 'POST', {}),
   startSession: (id: string, size: TermSize & { agent?: AgentKind }) => req<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}/session`, 'POST', size),
   fitPane: (id: string, paneId: string, size: TermSize) =>
     req<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}/panes/${encodeURIComponent(paneId)}/fit`, 'POST', size),

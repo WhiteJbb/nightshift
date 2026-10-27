@@ -295,7 +295,7 @@ test('dashboard: waiting tile, meta line, and session reset after confirm', asyn
     configPath: '/c.json',
     configMissing: false,
     configError: null,
-    summary: { total: 1, sessionsRunning: 1, running: 0, waiting: 1, idle: 0, stalled: 0, error: 0 },
+    summary: { total: 1, sessionsRunning: 1, running: 0, waiting: 1, idle: 0, stalled: 0, error: 0, off: 0 },
     projects: [project({ status: { state: 'waiting', reasons: [] } })],
   };
   const { container } = render(<Dashboard snapshot={snapshot} />);
@@ -351,7 +351,7 @@ const dash = (over: Partial<Snapshot> = {}): Snapshot => ({
   configPath: '/c.json',
   configMissing: false,
   configError: null,
-  summary: { total: 1, sessionsRunning: 1, running: 0, waiting: 1, idle: 0, stalled: 0, error: 0 },
+  summary: { total: 1, sessionsRunning: 1, running: 0, waiting: 1, idle: 0, stalled: 0, error: 0, off: 0 },
   projects: [project({ status: { state: 'waiting', reasons: [] } })],
   ...over,
 });
@@ -361,7 +361,7 @@ test('dashboard: the chosen filter survives dropping to 0, with an empty message
   fireEvent.click(screen.getByRole('button', { name: '입력 대기1' }));
   expect(screen.getByRole('button', { name: '전체 보기' })).toBeTruthy();
   // 입력 대기가 0 이 되어도 타일과 필터는 남고, 전체 목록으로 돌아가지 않는다
-  rerender(<Dashboard snapshot={dash({ summary: { total: 1, sessionsRunning: 1, running: 1, waiting: 0, idle: 0, stalled: 0, error: 0 }, projects: [project()] })} />);
+  rerender(<Dashboard snapshot={dash({ summary: { total: 1, sessionsRunning: 1, running: 1, waiting: 0, idle: 0, stalled: 0, error: 0, off: 0 }, projects: [project()] })} />);
   expect(screen.getByRole('button', { name: '입력 대기0' }).getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelectorAll('.card')).toHaveLength(0);
   expect(screen.getByText('현재 입력 대기 프로젝트가 없습니다.')).toBeTruthy();
