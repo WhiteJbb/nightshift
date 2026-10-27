@@ -34,7 +34,7 @@ const lastActivity = (p: ProjectSnapshot): string | null => {
   if (out && git) return Date.parse(git) > Date.parse(out) ? git : out;
   return out ?? git ?? p.tmux.lastActivityAt;
 };
-const URGENCY: Record<ProjectSnapshot['status']['state'], number> = { error: 0, waiting: 1, stalled: 2, running: 3, idle: 4 };
+const URGENCY: Record<ProjectSnapshot['status']['state'], number> = { error: 0, waiting: 1, stalled: 2, running: 3, idle: 4, off: 5 };
 // 일하는 중인 것끼리는 시각이 갱신마다 앞서거니 뒤서거니 해 자리가 뒤섞이므로 같게 보고 설정 순서 그대로 둔다
 const recency = (p: ProjectSnapshot) => (p.status.state === 'running' ? 0 : Date.parse(lastActivity(p) ?? '') || 0);
 /** 봐야 할 것부터(오류·입력 대기·정지 의심 → 작업 중 → 유휴), 같은 상태끼리는 최근에 일한 것부터 */

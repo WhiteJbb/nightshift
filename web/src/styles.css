@@ -585,6 +585,9 @@ main {
 .state-error {
   --state: var(--red);
 }
+.state-off {
+  --state: var(--dim);
+}
 /* 상태는 어디서나 "빛나는 점 + 글자" 한 가지 방식. 색만으로 뜻을 전하지 않는다 */
 .badge {
   flex: none;

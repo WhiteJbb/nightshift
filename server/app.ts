@@ -397,16 +397,29 @@ export function createApp({ config, monitor, runner, configEditor, terminal, tes
     res.json({ ok: true });
   });
 
-  // 세션 끝내기: 세션 만들기와 같은 조건(loopback·Tailscale). 글자를 보내는 일이 아니라 입력 허용과는 상관없다. 안에서 돌던 프로그램도 같이 끝난다
+  // 세션 끝내기: 세션 만들기와 같은 조건(loopback·Tailscale). 글자를 보내는 일이 아니라 입력 허용과는 상관없다. 안에서 돌던 프로그램도 같이 끝난다.
+  // 일부러 끈 세션은 오류가 아니라 꺼 둠으로 남는다 (같은 세션을 보는 프로젝트 모두)
   api.delete('/projects/:id/session', async (req, res) => {
     const project = monitor.config.projects.find((p) => p.id === req.params.id);
     if (!project) return void res.status(404).json({ error: '프로젝트를 찾을 수 없습니다' });
     const blocked = sessionBlocked();
     if (blocked || !terminal) return void res.status(403).json({ error: blocked });
-    if (!project.tmuxSession) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
-    const error = await terminal.killSession(project.tmuxSession);
+    const session = project.tmuxSession;
+    if (!session) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
+    const error = await monitor.endSession(session, () => terminal.killSession(session));
     if (error) return void res.status(400).json({ error });
-    await monitor.tick();
+    res.json({ ok: true });
+  });
+
+  // 대시보드 밖에서(터미널에서 exit 등) 끈 세션을 꺼 둠으로 표시한다. 세션을 다시 시작하면 풀린다
+  api.post('/projects/:id/off', (req, res) => {
+    const project = monitor.snapshot.projects.find((p) => p.id === req.params.id);
+    if (!project || !monitor.config.projects.some((p) => p.id === project.id)) return void res.status(404).json({ error: '프로젝트를 찾을 수 없습니다' });
+    const blocked = sessionBlocked();
+    if (blocked) return void res.status(403).json({ error: blocked });
+    if (!project.tmuxSession) return void res.status(400).json({ error: '이 프로젝트에는 tmux 세션이 등록되어 있지 않습니다' });
+    if (project.tmux.exists) return void res.status(409).json({ error: '세션이 돌고 있습니다. 끄려면 세션 종료를 누르세요' });
+    monitor.markOff(project.tmuxSession);
     res.json({ ok: true });
   });
 

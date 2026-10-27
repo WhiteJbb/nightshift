@@ -647,6 +647,80 @@ describe('followRepo to a folder beside the configured one', () => {
   }, 20_000);
 });
 
+describe('off', () => {
+  it('a session ended on purpose stays off across resets and restarts, until a new session comes up', async () => {
+    let exists = true;
+    let createdAt = 'A';
+    const cfg = (session: string) => parseConfig({ projects: [{ name: 'app', repoPath: '/repo/app', tmuxSession: session }] }, '/base');
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists, createdAt, attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config: cfg('app'), collector, runs: noRuns, now: () => T0 });
+    const state = (x = m) => x.snapshot.projects[0]!.status.state;
+    await m.tick();
+    // 끄자마자(다음 tick 전에) 다시 켠 새 세션이면 풀린다. 실패하면 표시하지 않는다
+    expect(await m.endSession('app', async () => 'tmux kill-session 실패')).toBe('tmux kill-session 실패');
+    expect(m.exportState().off).toEqual({});
+    expect(
+      await m.endSession('app', async () => {
+        createdAt = 'B';
+        return null;
+      }),
+    ).toBeNull();
+    expect(m.exportState().off).toEqual({});
+
+    expect(
+      await m.endSession('app', async () => {
+        exists = false;
+        return null;
+      }),
+    ).toBeNull();
+    expect(state()).toBe('off');
+    expect(m.snapshot.summary.off).toBe(1);
+    await m.reset();
+    expect(state()).toBe('off');
+    const again = new Monitor({ config: cfg('app'), collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
+    await again.tick();
+    expect(state(again)).toBe('off');
+    // 다시 켜면 풀리고, 그 뒤에 저절로 꺼지면 오류다
+    exists = true;
+    await again.tick();
+    expect(state(again)).not.toBe('off');
+    exists = false;
+    await again.tick();
+    expect(state(again)).toBe('error');
+
+    // 프로젝트가 보는 세션을 바꾸면 그 표시는 풀린다 (새 세션은 꺼 둔 적이 없다)
+    again.markOff('app');
+    expect(state(again)).toBe('off');
+    await again.setConfig(cfg('other'), collector);
+    expect(state(again)).toBe('error');
+  });
+
+  it('waits for a collection already in progress before marking and killing', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let exists = true;
+    const order: string[] = [];
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.git = async () => {
+      await gate;
+      return git();
+    };
+    collector.tmux = async () => new Map([['app', { configured: true, exists, createdAt: 'A', attached: false, lastActivityAt: null, output: [], panes: [], waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config: parseConfig({ projects: [{ name: 'app', repoPath: '/repo/app', tmuxSession: 'app' }] }, '/base'), collector, runs: noRuns, now: () => T0 });
+    const tick = m.tick().then(() => order.push('tick'));
+    const end = m.endSession('app', async () => {
+      order.push('kill');
+      exists = false;
+      return null;
+    });
+    release();
+    await Promise.all([tick, end]);
+    expect(order).toEqual(['tick', 'kill']);
+    expect(m.snapshot.projects[0]!.status.state).toBe('off');
+  });
+});
+
 describe('discover', () => {
   it('shows unconfigured tmux sessions as temporary projects and drops them when they close', async () => {
     let found = [{ name: 'app', cwd: '/repo/app' }, { name: 'scratch', cwd: '/tmp/scratch' }];

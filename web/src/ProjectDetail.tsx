@@ -532,7 +532,7 @@ function EndSession({ project: p }: { project: ProjectSnapshot }) {
   const running = p.tmux.exists;
   const end = () => {
     const ask = running
-      ? `"${p.tmuxSession}" 세션을 끝낼까요?\n안에서 돌던 프로그램(에이전트 포함)도 종료됩니다.`
+      ? `"${p.tmuxSession}" 세션을 끝낼까요?\n안에서 돌던 프로그램(에이전트 포함)도 종료됩니다. 대시보드에는 오류 대신 꺼 둠으로 남고, 세션을 다시 시작하면 이어서 지켜봅니다.`
       : `"${p.name}" 프로젝트를 목록에서 삭제할까요?\n폴더와 파일은 그대로 남습니다.`;
     if (!window.confirm(ask)) return;
     setBusy(true);
@@ -541,8 +541,22 @@ function EndSession({ project: p }: { project: ProjectSnapshot }) {
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setBusy(false));
   };
+  // 대시보드 밖에서(터미널에서 exit 등) 끈 세션은 오류로 뜬다. 일부러 끈 것이면 꺼 둠으로 돌린다 (세션을 다시 시작하면 풀린다)
+  const markOff = () => {
+    setBusy(true);
+    setError(null);
+    api
+      .markOff(p.id)
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setBusy(false));
+  };
   return (
     <p className="end-session">
+      {!running && p.tmux.configured && p.status.state === 'error' && (
+        <button type="button" disabled={busy} onClick={markOff} title="일부러 끈 세션이면 오류 대신 꺼 둠으로 둡니다. 세션을 다시 시작하면 풀립니다">
+          꺼 둠으로 두기
+        </button>
+      )}{' '}
       <button type="button" className="danger" disabled={busy} onClick={end}>
         {running ? (busy ? '끝내는 중…' : '세션 종료') : busy ? '삭제하는 중…' : '삭제'}
       </button>

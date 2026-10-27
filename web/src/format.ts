@@ -6,6 +6,7 @@ export const STATE_LABEL: Record<ProjectState, string> = {
   idle: '유휴',
   stalled: '정지 의심',
   error: '오류',
+  off: '꺼 둠',
 };
 
 /** now 는 스냅샷의 generatedAt (서버 시계 기준이라 렌더가 순수하게 유지된다) */
