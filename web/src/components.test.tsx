@@ -145,7 +145,7 @@ test('the Git tab fetches the full since-baseline lists when the live snapshot o
 test('the Git tab shows the real file count and fetches the full list when the live snapshot cut it', async () => {
   const files = Array.from({ length: 3 }, (_, i) => ({ path: `out/${i}.csv`, status: '??' }));
   respond(200, { ...project(), git: { ...project().git, clean: false, changedFiles: files } });
-  render(<GitTab project={project({ git: { ...project().git, clean: false, changedFiles: files.slice(0, 1), changedTotal: 3 } })} now={NOW} />);
+  render(<GitTab project={project({ git: { ...project().git, clean: false, changedFiles: files.slice(0, 1), cut: { total: 3, key: 'k' } } })} now={NOW} />);
   expect(screen.getByText('변경된 파일 (3)')).toBeTruthy();
   expect(await screen.findByText('out/2.csv')).toBeTruthy();
 });

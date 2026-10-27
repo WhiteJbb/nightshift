@@ -44,9 +44,12 @@ describe('API', () => {
     const p = monitor.snapshot.projects[0]!;
     const many = Array.from({ length: STREAM_FILES + 1 }, (_, i) => ({ path: `f${i}`, status: '??' }));
     const big = slimSnapshot({ ...monitor.snapshot, projects: [{ ...p, git: { ...p.git, changedFiles: many, fingerprint: 'x' } }] }).projects[0]!.git;
-    expect(big).toMatchObject({ changedTotal: STREAM_FILES + 1, fingerprint: '' });
+    expect(big).toMatchObject({ cut: { total: STREAM_FILES + 1 }, fingerprint: '' });
     expect(big.changedFiles).toHaveLength(STREAM_FILES);
-    expect(slimSnapshot(monitor.snapshot).projects[0]!.git.changedTotal).toBeUndefined();
+    expect(slimSnapshot(monitor.snapshot).projects[0]!.git.cut).toBeUndefined();
+    // 잘린 뒤쪽 파일만 바뀌어도 전체 목록의 지문이 바뀐다 (그때 화면이 전체를 다시 받는다)
+    const later = many.map((f, i) => (i === STREAM_FILES ? { ...f, status: 'A ' } : f));
+    expect(slimSnapshot({ ...monitor.snapshot, projects: [{ ...p, git: { ...p.git, changedFiles: later } }] }).projects[0]!.git.cut!.key).not.toBe(big.cut!.key);
   });
 
   it('gzips the snapshot, a project and the live stream for clients that accept it', async () => {

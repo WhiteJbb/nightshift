@@ -221,7 +221,7 @@ let clipboard: { scope: string; path: string; cut: boolean } | null = null;
 const DRAG_TYPE = 'application/x-nightshift-path';
 
 function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (path: string) => void }) {
-  // changed: 실시간 스냅샷의 변경 파일 목록이 잘려 있을 때(changedTotal) 따로 받은 전체
+  // changed: 실시간 스냅샷의 변경 파일 목록이 잘려 있을 때(cut) 따로 받은 전체
   const [list, setList] = useState<{ files: string[]; ignored: string[]; changed?: ProjectSnapshot['git']['changedFiles'] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -290,7 +290,7 @@ function FileList({ project: p, onOpen }: { project: ProjectSnapshot; onOpen: (p
   const [opError, setOpError] = useState<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
 
-  const cut = p.git.changedTotal !== undefined;
+  const cut = p.git.cut?.key;
   const changedFiles = list?.changed ?? p.git.changedFiles;
   const known = useMemo(() => new Set(list?.files), [list]);
   const ignored = useMemo(() => new Set(list?.ignored), [list]);

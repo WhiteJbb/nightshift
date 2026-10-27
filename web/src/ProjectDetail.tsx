@@ -1119,9 +1119,9 @@ function Stats({ files, additions, deletions, empty }: { files: FileStat[]; addi
 }
 
 export function GitTab({ project: p, now }: Props) {
-  // 실시간 스냅샷의 기준점 정보는 목록이 빠진 요약이고 (partial), 변경 파일이 많으면 그 목록도 잘려 있다 (changedTotal).
-  // 탭을 열거나 Git 이 바뀌면 전체를 받는다
-  const cut = p.git.changedTotal !== undefined;
+  // 실시간 스냅샷의 기준점 정보는 목록이 빠진 요약이고 (partial), 변경 파일이 많으면 그 목록도 잘려 있다 (cut).
+  // 탭을 열거나 Git 이나 잘린 목록이 바뀌면 전체를 받는다
+  const cut = p.git.cut?.key;
   const [full, setFull] = useState<ProjectSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -1158,7 +1158,7 @@ export function GitTab({ project: p, now }: Props) {
           </dl>
 
           <section>
-            <h3>변경된 파일 ({git.changedTotal ?? git.changedFiles.length})</h3>
+            <h3>변경된 파일 ({git.cut?.total ?? git.changedFiles.length})</h3>
             {git.changedFiles.length === 0 ? (
               <p className="dim">변경된 파일이 없습니다.</p>
             ) : (

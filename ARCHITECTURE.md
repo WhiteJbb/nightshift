@@ -138,7 +138,7 @@ v1의 원칙은 "웹에서 임의 명령을 실행할 수 없다"였다. 터미�
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/api/snapshot` | 현재 스냅샷 (`/api/events` 와 같은 요약) |
-| GET | `/api/events` | SSE, 폴링마다·실행 상태 변경 시 스냅샷 푸시 (pane 화면 사본·기준점 이후 목록·Git 지문을 빼고, 변경 파일 목록은 300개까지 자른 요약. 잘랐으면 `git.changedTotal` 에 실제 수) |
+| GET | `/api/events` | SSE, 폴링마다·실행 상태 변경 시 스냅샷 푸시 (pane 화면 사본·기준점 이후 목록·Git 지문을 빼고, 변경 파일 목록은 300개까지 자른 요약. 잘랐으면 `git.cut` 에 실제 수와 전체 목록의 지문) |
 | GET | `/api/projects/:id` | 한 프로젝트의 전체 상태 (Git·파일 탭이 기준점 이후 목록이나 잘린 변경 파일 목록을 받을 때) |
 | GET | `/api/projects/:id/files` | Git 이 아는 파일 목록 (`ls-files --cached --others --exclude-standard`). `ignored`: 입력 허용 프로젝트만, 무시된 파일(무시된 폴더 안은 제외) |
 | GET | `/api/projects/:id/file?path=` | 글 파일 내용과 지문(sha1). 400 / 404 / 413 / 415 |

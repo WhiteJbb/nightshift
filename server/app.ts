@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { constants, createGzip, gzipSync } from 'node:zlib';
@@ -133,7 +134,15 @@ export const slimSnapshot = (s: Snapshot): Snapshot => ({
     const cut = p.git.changedFiles.length > STREAM_FILES || p.git.diffStat.length > STREAM_FILES;
     return {
       ...p,
-      git: { ...p.git, fingerprint: '', ...(cut && { changedFiles: p.git.changedFiles.slice(0, STREAM_FILES), diffStat: p.git.diffStat.slice(0, STREAM_FILES), changedTotal: p.git.changedFiles.length }) },
+      git: {
+        ...p.git,
+        fingerprint: '',
+        ...(cut && {
+          changedFiles: p.git.changedFiles.slice(0, STREAM_FILES),
+          diffStat: p.git.diffStat.slice(0, STREAM_FILES),
+          cut: { total: p.git.changedFiles.length, key: createHash('sha1').update(JSON.stringify([p.git.changedFiles, p.git.diffStat])).digest('base64url') },
+        }),
+      },
       tmux: { ...p.tmux, panes: p.tmux.panes.map((x) => ({ ...x, lines: [] })), output: p.tmux.panes.length ? [] : p.tmux.output },
       since: p.since && { ...p.since, commits: [], files: [], partial: true },
     };
