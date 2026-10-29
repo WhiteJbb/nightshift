@@ -533,6 +533,10 @@ main {
 .page {
   max-width: 1180px;
 }
+/* 대시보드 카드 격자는 폭에 맞춰 열이 늘어나니 큰 화면에서 왼쪽에 몰리지 않게 폭 제한을 푼다 */
+.page:has(.board) {
+  max-width: none;
+}
 /* 컴퓨터에서 터미널 탭은 창 폭을 다 쓴다: 큰 화면에서 터미널이 왼쪽에만 붙지 않게, 나란히 보기의 칸도 넓게 (다른 탭은 읽기 좋은 폭을 지킨다) */
 @media (pointer: fine) {
   .page:has(.term-wrap) {
