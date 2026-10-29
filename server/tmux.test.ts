@@ -231,6 +231,13 @@ describe('pattern helpers', () => {
     expect(askedQuestion([...fruit, '  ⎿  · Which fruit do you like? → Banana', '✻ Cooked for 2s', rule, '❯ ', rule, '  ⏵⏵ auto mode on'])).toBeNull();
     expect(askedQuestion([' ☐ Fruit', 'Which?', '  1. Apple', 'Enter to select'])).toEqual({ prompt: '선택지 질문에 답하기를 기다리는 중', choices: [{ key: '1', label: 'Apple' }] });
     expect(askedQuestion(['answer', 'Enter to select · ↑/↓ to navigate'])).toBeNull();
+    // 설명 줄의 번호 목록은 선택지가 아니다
+    const steps = [rule, ' ☐ Plan', 'Which plan?', '❯ 1. Staged', '     1. Build first', '     2. Test before rollout', '  2. All at once', rule, '  3. Chat about this', 'Enter to select · ↑/↓ to navigate · Esc to cancel'];
+    expect(askedQuestion(steps)?.choices).toEqual([
+      { key: '1', label: 'Staged' },
+      { key: '2', label: 'All at once' },
+      { key: '3', label: 'Chat about this' },
+    ]);
   });
 
   it('on a phone-width screen, sees work by the spinner even when the status line kept another item, and by a cut Codex status line', () => {

@@ -462,8 +462,8 @@ export class Monitor {
       const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
-        // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다
-        const asked = askedQuestion(lines);
+        // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다. 패턴을 비워 입력 대기 감지를 껐으면 보지 않는다
+        const asked = this.opts.config.promptPatterns.length ? askedQuestion(lines) : null;
         waitingPrompt = asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns);
         const pane = raw.panes[i];
         const options = asked?.choices ?? (waitingPrompt !== null && pane ? promptChoices(lines, waitingPrompt) : []);

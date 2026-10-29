@@ -113,8 +113,7 @@ export function promptChoices(lines: string[], prompt: string): { key: string; l
     const m = CHOICE_RE.exec(line);
     if (m && !seen.has(m[1]!)) {
       seen.add(m[1]!);
-      // 선택지 오른쪽에 미리보기 상자가 붙으면("1. Canary   ┌────┐") 두 칸 이상 띈 곳부터 뺀다
-      options.push({ key: m[1]!, label: m[2]!.split(/\s{2,}/)[0]! });
+      options.push({ key: m[1]!, label: m[2]! });
     }
   }
   return options;
@@ -123,10 +122,10 @@ export function promptChoices(lines: string[], prompt: string): { key: string; l
 const EDGE_RE = /^[\s│┃║▌]+|[\s│┃║▌]+$/g;
 const TAIL_PUNCT_RE = /[\s:?.!>]+$/;
 // Claude Code 선택지 질문(AskUserQuestion): 맨 아래 안내 줄, 테두리 바로 아래 머리표(" ☐ Fruit", "←  ☐ Fruit  ☐ Color  ✔ Submit  →"),
-// 첫 선택지("❯ 1. Apple", "  1. Apple". 설명 줄은 더 들여 써진다)
+// 선택지("❯ 1. Apple", "  2. Banana". 설명 줄은 더 들여 써져 "     2. …" 같은 번호가 있어도 선택지가 아니다)
 const MENU_HINT_RE = /^Enter to select\b/;
 const CHIP_RE = /^(?: [☐☒]|←\s+[☐☒✔]) /;
-const FIRST_CHOICE_RE = /^[❯\s]\s1\.\s/;
+const OPTION_RE = /^[❯\s]\s([1-9])\.\s+(.+)/;
 /**
  * Claude Code 가 선택지 질문을 띄우고 답을 기다리면 질문과 번호 선택지(숫자 키로 바로 고른다), 아니면 null.
  * 질문이 길어 화면 위로 밀려났으면 질문 대신 정해진 말을 쓴다
@@ -134,11 +133,16 @@ const FIRST_CHOICE_RE = /^[❯\s]\s1\.\s/;
 export function askedQuestion(lines: string[]): { prompt: string; choices: { key: string; label: string }[] } | null {
   const tail = lines.filter((l) => l.trim() !== '');
   if (!tail.slice(-3).some((l) => MENU_HINT_RE.test(l))) return null;
-  const first = tail.findLastIndex((l) => FIRST_CHOICE_RE.test(l));
+  const first = tail.findLastIndex((l) => OPTION_RE.exec(l)?.[1] === '1');
   if (first < 0) return null;
   const top = tail.findLastIndex((l, i) => i < first && /^─{3,}\s*$/.test(l));
   const question = top >= 0 && CHIP_RE.test(tail[top + 1] ?? '') ? tail.slice(top + 2, first).map((l) => l.replace(EDGE_RE, '')).filter(Boolean).join(' ') : '';
-  return { prompt: question || '선택지 질문에 답하기를 기다리는 중', choices: promptChoices(tail.slice(first), tail[first]!.trim()) };
+  // 선택지 오른쪽에 미리보기 상자가 붙으면("1. Canary   ┌────┐") 두 칸 이상 띈 곳부터 뺀다
+  const choices = tail.slice(first).flatMap((l) => {
+    const m = OPTION_RE.exec(l);
+    return m ? [{ key: m[1]!, label: m[2]!.split(/\s{2,}/)[0]!.trim() }] : [];
+  });
+  return { prompt: question || '선택지 질문에 답하기를 기다리는 중', choices };
 }
 /**
  * 화면 마지막 줄들에서 입력 대기 프롬프트를 찾는다. 없으면 null.
