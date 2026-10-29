@@ -6,7 +6,7 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
+import { aboveInput, askedQuestion, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
 import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
@@ -462,9 +462,11 @@ export class Monitor {
       const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
       plain.forEach((lines, i) => {
         if (waitingPrompt !== null) return;
-        waitingPrompt = findPrompt(lines, this.opts.config.promptPatterns);
+        // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다
+        const asked = askedQuestion(lines);
+        waitingPrompt = asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns);
         const pane = raw.panes[i];
-        const options = waitingPrompt !== null && pane ? promptChoices(lines, waitingPrompt) : [];
+        const options = asked?.choices ?? (waitingPrompt !== null && pane ? promptChoices(lines, waitingPrompt) : []);
         if (pane && options.length) waitingChoices = { pane: pane.id, options };
       });
       // 보는 화면에 맞춰 pane 크기를 바꾸면 프로그램이 화면을 다시 그린다. 그 변화로 "실행 중"이 되지 않게 잠시 무시한다

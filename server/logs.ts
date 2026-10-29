@@ -46,6 +46,8 @@ export function aboveInput(lines: string[]): string[] {
 }
 // Claude Code 의 작업 중 스피너 줄 ("✢ Nesting… (2s · ↓ 55 tokens)"). 끝난 뒤의 "✻ Sautéed for 5s · done" 과 다르다
 const SPINNER_RE = /^[·✢✳✶✻✽*∗] [^\s…]+…/;
+// 폭이 좁아 끝이 잘린 Codex 작업 줄 ("• Waiting for background terminal (1m 25s • es…"). 경과 시간까지 보이면 일하는 중이다
+const CODEX_CUT_RE = /^• \S.* \(\d[\dhms ]*(?: •[^)]*)?…$/;
 // 권한 모드로 시작하는 Claude Code 하단 줄("⏵⏵ auto mode on …", "⏸ plan mode on …")이 구분점으로 끝남 = 들어가지 않는 항목을 뺐다
 const FOOTER_CUT_RE = /^\s*(?:⏵⏵|⏸)\s.*\s·\s*$/;
 // 턴은 끝났지만 스스로 이어서 일할 것을 기다리는 Claude Code 의 턴 끝 줄: 백그라운드 에이전트·워크플로
@@ -91,12 +93,14 @@ export function isBusy(lines: string[], patterns: string[], changed = false): bo
     return !!m && needles.some((n) => [...Array(n.length).keys()].some((k) => k >= 3 && m[1]!.endsWith(n.slice(0, k))));
   };
   const tail = lines.filter((l) => l.trim() !== '');
-  if (tail.slice(-6).some((l) => match(l) || cut(l))) return true;
-  // 휴대폰 폭(43칸)에선 Claude Code 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남긴다 ("… (shift+tab to cycle) ·").
-  // 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어, 스피너 줄이 보이거나(생각·도구 실행) 화면이 바뀔 때(답을 쓰는 중)만 일하는 것으로 본다
-  if (!tail.slice(-3).some((l) => FOOTER_CUT_RE.test(l))) return false;
-  // 스피너는 입력칸(치는 중인 글) 위에서만 찾는다
-  return changed || aboveInput(tail).slice(-12).some((l) => SPINNER_RE.test(l.trim()));
+  if (tail.slice(-6).some((l) => match(l) || cut(l) || CODEX_CUT_RE.test(l))) return true;
+  // Claude Code 가 생각하거나 도구를 돌리는 동안은 입력칸 위에 스피너 줄이 있다. 휴대폰 폭에선 하단 줄에서 "esc to interrupt" 가 빠지고
+  // 다른 항목("· ⧉ …")이 남기도 하니 하단 줄과 상관없이 본다. 스피너는 첫 칸에서 시작하고(답 본문은 들여 써진다), 입력칸(치는 중인 글) 위에서만 찾는다
+  const above = aboveInput(tail);
+  if (above.length < tail.length && above.slice(-12).some((l) => SPINNER_RE.test(l))) return true;
+  // 답을 쓰는 동안은 스피너가 없다. 하단 줄이 "esc to interrupt" 를 통째로 빼고 구분점만 남겼으면("… (shift+tab to cycle) ·")
+  // 화면이 바뀔 때 일하는 것으로 본다. 빠진 게 다른 항목("1 feedback draft" 등)일 수도 있어 구분점만으로는 보지 않는다
+  return changed && tail.slice(-3).some((l) => FOOTER_CUT_RE.test(l));
 }
 const CHOICE_RE = /^[\s│┃║▌]*(?:[❯›>]\s*)?([1-9])[.)]\s+(.+?)[\s│┃║]*$/;
 /** 프롬프트 줄부터 아래로 "1. Yes" 같은 번호 선택지를 모은다 (같은 번호는 처음 것만). */
@@ -109,7 +113,8 @@ export function promptChoices(lines: string[], prompt: string): { key: string; l
     const m = CHOICE_RE.exec(line);
     if (m && !seen.has(m[1]!)) {
       seen.add(m[1]!);
-      options.push({ key: m[1]!, label: m[2]! });
+      // 선택지 오른쪽에 미리보기 상자가 붙으면("1. Canary   ┌────┐") 두 칸 이상 띈 곳부터 뺀다
+      options.push({ key: m[1]!, label: m[2]!.split(/\s{2,}/)[0]! });
     }
   }
   return options;
@@ -117,6 +122,24 @@ export function promptChoices(lines: string[], prompt: string): { key: string; l
 // 줄 앞뒤의 공백·상자 테두리, 끝의 문장 부호
 const EDGE_RE = /^[\s│┃║▌]+|[\s│┃║▌]+$/g;
 const TAIL_PUNCT_RE = /[\s:?.!>]+$/;
+// Claude Code 선택지 질문(AskUserQuestion): 맨 아래 안내 줄, 테두리 바로 아래 머리표(" ☐ Fruit", "←  ☐ Fruit  ☐ Color  ✔ Submit  →"),
+// 첫 선택지("❯ 1. Apple", "  1. Apple". 설명 줄은 더 들여 써진다)
+const MENU_HINT_RE = /^Enter to select\b/;
+const CHIP_RE = /^(?: [☐☒]|←\s+[☐☒✔]) /;
+const FIRST_CHOICE_RE = /^[❯\s]\s1\.\s/;
+/**
+ * Claude Code 가 선택지 질문을 띄우고 답을 기다리면 질문과 번호 선택지(숫자 키로 바로 고른다), 아니면 null.
+ * 질문이 길어 화면 위로 밀려났으면 질문 대신 정해진 말을 쓴다
+ */
+export function askedQuestion(lines: string[]): { prompt: string; choices: { key: string; label: string }[] } | null {
+  const tail = lines.filter((l) => l.trim() !== '');
+  if (!tail.slice(-3).some((l) => MENU_HINT_RE.test(l))) return null;
+  const first = tail.findLastIndex((l) => FIRST_CHOICE_RE.test(l));
+  if (first < 0) return null;
+  const top = tail.findLastIndex((l, i) => i < first && /^─{3,}\s*$/.test(l));
+  const question = top >= 0 && CHIP_RE.test(tail[top + 1] ?? '') ? tail.slice(top + 2, first).map((l) => l.replace(EDGE_RE, '')).filter(Boolean).join(' ') : '';
+  return { prompt: question || '선택지 질문에 답하기를 기다리는 중', choices: promptChoices(tail.slice(first), tail[first]!.trim()) };
+}
 /**
  * 화면 마지막 줄들에서 입력 대기 프롬프트를 찾는다. 없으면 null.
  * 글자 패턴은 줄 맨 앞("Do you want to …")이나 맨 끝("… (y/n)")에 있을 때만 맞는다:
