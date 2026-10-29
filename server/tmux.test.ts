@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './exec.ts';
-import { aboveInput, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
+import { aboveInput, askedQuestion, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
 import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
 // 줄 세운 실행도 같은 가짜 run 으로 간다
@@ -199,6 +199,65 @@ describe('pattern helpers', () => {
     expect(isBusy(['• Working (12s • esc to…'], p)).toBe(true);
     expect(isBusy(['  ⏵⏵ auto mode on (shift+tab to cycle) · esc …'], p)).toBe(true);
     expect(isBusy(['  ⏵⏵ auto mode on · 1 shell · ↓ to manag…'], p)).toBe(false);
+  });
+
+  it("reads Claude Code's multiple-choice question and its numbered choices", () => {
+    const rule = '────────────────────────────────────────────────';
+    // 넓은 화면, 질문 하나
+    const fruit = ['❯ Ask me which fruit I like.', rule, ' ☐ Fruit', 'Which fruit do you like?', '❯ 1. Apple', '     Apple', '  2. Banana', '     Banana', '  3. Type something.', rule, '  5. Chat about this', 'Enter to select · ↑/↓ to navigate · Esc to cancel'];
+    expect(askedQuestion(fruit)).toEqual({
+      prompt: 'Which fruit do you like?',
+      choices: [
+        { key: '1', label: 'Apple' },
+        { key: '2', label: 'Banana' },
+        { key: '3', label: 'Type something.' },
+        { key: '5', label: 'Chat about this' },
+      ],
+    });
+    // 휴대폰 폭: 질문 여러 개(탭), 긴 질문은 막대를 달고 넘어가며, 오른쪽에 미리보기 상자가 붙는다. 안내 줄도 다음 줄로 넘어간다
+    const deploy = [rule, '←  ☐ Deploy  ☐ Color  ✔ Submit  →', '│ Which deployment plan should we pick for the', '│ next release?', '❯ 1. Canary rollout        ┌────────────┐', '  2. Blue-green switch     │ Canary     │', '                           │ rollout    │', '                           └────────────┘', rule, '  Chat about this', 'Enter to select · ↑/↓ to navigate · n to add', 'notes · Esc to cancel'];
+    expect(askedQuestion(deploy)).toEqual({
+      prompt: 'Which deployment plan should we pick for the next release?',
+      choices: [
+        { key: '1', label: 'Canary rollout' },
+        { key: '2', label: 'Blue-green switch' },
+      ],
+    });
+    // 실제 화면 (48칸): 질문이 길어 머리표가 화면 위로 밀려났다. 질문 본문의 "2) …" 는 선택지가 아니다
+    const homelab = ['│ 2) 모아 SOUL.md 배포: 12.2에 줄을 추가합니다.', '│ 하나씩 해 봅니다.', '❯ 1. 전부 진행 (Recommended)', '     백업한 뒤 1~3을 순서대로 하고 E2E까지', '  2. 재시작만 나중에', '     파일만 배포합니다.', '  3. Type something.', rule, '  4. Chat about this', 'Enter to select · ↑/↓ to navigate · Esc to', 'cancel'];
+    expect(askedQuestion(homelab)?.prompt).toBe('선택지 질문에 답하기를 기다리는 중');
+    expect(askedQuestion(homelab)?.choices.map((c) => c.label)).toEqual(['전부 진행 (Recommended)', '재시작만 나중에', 'Type something.', 'Chat about this']);
+    // 안내 줄이 맨 아래에 없으면(답한 뒤 대화에 남은 것, 입력칸) 질문이 아니다
+    expect(askedQuestion([...fruit, '  ⎿  · Which fruit do you like? → Banana', '✻ Cooked for 2s', rule, '❯ ', rule, '  ⏵⏵ auto mode on'])).toBeNull();
+    expect(askedQuestion([' ☐ Fruit', 'Which?', '  1. Apple', 'Enter to select'])).toEqual({ prompt: '선택지 질문에 답하기를 기다리는 중', choices: [{ key: '1', label: 'Apple' }] });
+    expect(askedQuestion(['answer', 'Enter to select · ↑/↓ to navigate'])).toBeNull();
+    // 설명 줄의 번호 목록은 선택지가 아니다
+    const steps = [rule, ' ☐ Plan', 'Which plan?', '❯ 1. Staged', '     1. Build first', '     2. Test before rollout', '  2. All at once', rule, '  3. Chat about this', 'Enter to select · ↑/↓ to navigate · Esc to cancel'];
+    expect(askedQuestion(steps)?.choices).toEqual([
+      { key: '1', label: 'Staged' },
+      { key: '2', label: 'All at once' },
+      { key: '3', label: 'Chat about this' },
+    ]);
+  });
+
+  it('on a phone-width screen, sees work by the spinner even when the status line kept another item, and by a cut Codex status line', () => {
+    const p = ['esc to interrupt'];
+    // 실제 화면 (48칸): 하단 줄이 "esc to interrupt" 를 빼고 "⧉ …" 를 남겼다. 스피너 아래로 팁이 들여 써 붙고, 대기 메시지는 위에 온다
+    const box = ['────────', '❯ ', '────────', '  ⏵⏵ auto mode on (shift+tab to cycle) · ⧉ 홈'];
+    const spinning = ['❯ also tell me a joke after', '  ctrl+x ctrl+s to send now', '✶ Fiddle-faddling… (5m 16s · thinking)', '  ⎿  Tip: Use /btw to ask a quick side question', '         ✔ Update installed · Restart to apply'];
+    expect(isBusy([...spinning, ...box], p)).toBe(true);
+    // 끝난 뒤엔 같은 하단 줄이어도 쉬는 중이다
+    expect(isBusy(['  the end.', '✻ Worked for 7m 2s · done 7:31 PM', ...box], p)).toBe(false);
+    expect(isBusy(['  the end.', '✻ Worked for 7m 2s · done 7:31 PM', ...box], p, true)).toBe(false);
+    // 들여 쓴 답 본문의 같은 모양은 스피너가 아니다
+    expect(isBusy(['  ✢ Nesting… (2s)', ...box], p)).toBe(false);
+    // Codex: 머리말이 길면 경과 시간 뒤가 잘린다. 경과 시간이 안 보이면 알 수 없다
+    for (const l of ['• Waiting for background terminal (1m 25s • es…', '• Exploring the repository layout (1m 2…', '• Working (2h 3m 1s…']) {
+      expect(isBusy([l, '  └ python3 build.py', '› Ask Codex to do anything', '  GPT-6 high · ~/repo', '  ← for agents · ? for shortcuts'], p)).toBe(true);
+    }
+    for (const l of ['• 다음 단계는 (선택)…', '• 응. 5만 step (50k)으로 통일했어', '  Worked for 12s • Oct 27 at 5:48 PM']) {
+      expect(isBusy([l, '› Ask Codex to do anything', '  GPT-6 high · ~/repo', '  ← for agents · ? for shortcuts'], p)).toBe(false);
+    }
   });
 
   it('sees Claude Code waiting for background agents or a Monitor, until something comes after that line', () => {
