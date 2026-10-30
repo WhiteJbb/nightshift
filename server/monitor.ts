@@ -466,15 +466,16 @@ export class Monitor {
       const byId = ids.map((id, i) => ({ id, i, cols: raw.panes[i]?.cols ?? 0 })).sort((a, b) => a.id.localeCompare(b.id));
       const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
       const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
-      plain.forEach((lines, i) => {
-        if (waitingPrompt !== null) return;
-        // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다. 패턴을 비워 입력 대기 감지를 껐으면 보지 않는다
+      // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다. 패턴을 비워 입력 대기 감지를 껐으면 보지 않는다
+      const asking = plain.map((lines) => {
         const asked = this.opts.config.promptPatterns.length ? askedQuestion(lines) : null;
-        waitingPrompt = asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns);
-        const pane = raw.panes[i];
-        const options = asked?.choices ?? (waitingPrompt !== null && pane ? promptChoices(lines, waitingPrompt) : []);
-        if (pane && options.length) waitingChoices = { pane: pane.id, options };
+        return { asked, prompt: asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns) };
       });
+      const ask = asking.findIndex((x) => x.prompt !== null);
+      waitingPrompt = asking[ask]?.prompt ?? null;
+      const pane = raw.panes[ask];
+      const options = waitingPrompt === null ? [] : (asking[ask]!.asked?.choices ?? (pane ? promptChoices(plain[ask]!, waitingPrompt) : []));
+      if (pane && options.length) waitingChoices = { pane: pane.id, options };
       // 보는 화면에 맞춰 pane 크기를 바꾸면 프로그램이 화면을 다시 그린다. 그 변화로 "실행 중"이 되지 않게 잠시 무시한다
       const sizeKey = raw.panes.length ? byId.map((x) => `${x.id}:${x.cols}`).join(',') : '';
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
@@ -515,7 +516,9 @@ export class Monitor {
       tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = waiting ? 'waiting' : tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
       const before = tr.paneQuiet;
-      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, paneBusy[i] || paneWaiting[i] ? 0 : Math.min(READY_TICKS, (before[id] ?? READY_TICKS) + 1)]] : [])));
+      // 질문에 답을 기다리는 터미널은 일을 마친 게 아니라 일하는 도중이다
+      const working = (i: number) => paneBusy[i] || paneWaiting[i] || asking[i]!.prompt !== null;
+      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, working(i) ? 0 : Math.min(READY_TICKS, (before[id] ?? READY_TICKS) + 1)]] : [])));
       panes = raw.panes.map((x, i) => (tr.paneQuiet[x.id] === undefined ? x : { ...x, agent: paneWaiting[i] ? 'waiting' : tr.paneQuiet[x.id]! >= READY_TICKS ? 'ready' : 'busy' }));
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;

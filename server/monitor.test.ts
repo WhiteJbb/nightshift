@@ -142,6 +142,16 @@ describe('Monitor', () => {
     }
     expect(agents()).toEqual(['busy', 'ready', undefined]);
     expect(m.snapshot.projects.find((p) => p.id === 'app')!.tmux.agent).toBe('busy');
+    // 1번이 다시 일하다 승인을 묻고 있으면(그사이 작업 중 표시를 못 봤어도) 끝난 게 아니다
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', ['Do you want to proceed?', '❯ 1. Yes', '  2. No']), pane('%3', 2, 'zsh', ['$ '])];
+    now += 5000;
+    await m.tick();
+    expect(agents()).toEqual(['busy', 'busy', undefined]);
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', ['done', '› Ask Codex']), pane('%3', 2, 'zsh', ['$ '])];
+    for (let i = 0; i < READY_TICKS; i++) {
+      now += 5000;
+      await m.tick();
+    }
     // 1번에서 에이전트를 끄고 셸로 돌아온 뒤 재시작해도 그 터미널은 일을 마친 에이전트로 남는다
     state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'zsh', ['$ ']), pane('%3', 2, 'zsh', ['$ '])];
     const again = new Monitor({ config, collector, runs: noRuns, now: () => now, restore: JSON.parse(JSON.stringify(m.exportState())) });
