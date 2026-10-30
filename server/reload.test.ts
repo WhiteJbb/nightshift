@@ -207,6 +207,12 @@ describe('alerts', () => {
     // 같은 때 둘 다 끝나도 하나씩 알린다
     alertsFor(memory, at('running', 'busy', 'busy'));
     expect(alertsFor(memory, at('idle', 'ready', 'ready')).map((x) => x.pane)).toEqual(['%1', '%2']);
+    // 하나는 끝나고, 일하던 다른 하나를 닫아 세션이 쉬게 되면 끝난 쪽만 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    expect(alertsFor(memory, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    const closed = at('idle', 'ready', 'ready');
+    closed.projects[0]!.tmux.panes.pop();
+    expect(alertsFor(memory, closed)).toEqual([]);
 
     // 0번 터미널을 보고 있어도 1번의 끝남은 미루지 않는다 (잠깐 기다리는 것만). 0번은 그만 보면, 1번이 다시 일해도 보낸다.
     // 기다리는 사이 그 터미널이 다시 일하면 버린다

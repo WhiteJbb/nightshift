@@ -142,6 +142,11 @@ describe('Monitor', () => {
     }
     expect(agents()).toEqual(['busy', 'ready', undefined]);
     expect(m.snapshot.projects.find((p) => p.id === 'app')!.tmux.agent).toBe('busy');
+    // 1번에서 에이전트를 끄고 셸로 돌아온 뒤 재시작해도 그 터미널은 일을 마친 에이전트로 남는다
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'zsh', ['$ ']), pane('%3', 2, 'zsh', ['$ '])];
+    const again = new Monitor({ config, collector, runs: noRuns, now: () => now, restore: JSON.parse(JSON.stringify(m.exportState())) });
+    await again.tick();
+    expect(again.snapshot.projects.find((p) => p.id === 'app')!.tmux.panes.map((x) => x.agent)).toEqual(['busy', 'ready', undefined]);
   });
 
   it('does not count the redraw after a pane resize as activity', async () => {

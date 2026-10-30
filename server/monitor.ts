@@ -110,7 +110,7 @@ interface Tracked {
   agent: boolean;
   /** 작업 중 표시가 연달아 보이지 않은 tick 수 (도구 호출 사이의 잠깐 빈 틈을 "끝남"으로 보지 않게) */
   quietTicks: number;
-  /** 에이전트 pane 마다의 quietTicks. 한 세션에 에이전트가 여럿이면 터미널마다 따로 끝남을 알린다 */
+  /** 에이전트 pane 마다의 quietTicks (READY_TICKS 까지만 센다). 한 세션에 에이전트가 여럿이면 터미널마다 따로 끝남을 알린다 */
   paneQuiet: Record<string, number>;
   /** 작업 중 표시를 마지막으로 본 시각. 스크롤·입력칸 타이핑도 화면을 바꾸지만 그건 일이 아니다 (대시보드 순서에 쓴다) */
   busyAt: string | null;
@@ -176,7 +176,7 @@ export class Monitor {
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
-      if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, busyAt: saved.busyAt ?? null });
+      if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, paneQuiet: saved.paneQuiet ?? {}, busyAt: saved.busyAt ?? null });
       if (saved?.looked) this.looked.set(p.id, saved.looked);
     }
     this.snapshot = this.build();
@@ -226,7 +226,7 @@ export class Monitor {
     const tracked: MonitorState['tracked'] = {};
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
     return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
@@ -515,7 +515,7 @@ export class Monitor {
       tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = waiting ? 'waiting' : tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
       const before = tr.paneQuiet;
-      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, paneBusy[i] || paneWaiting[i] ? 0 : (before[id] ?? READY_TICKS) + 1]] : [])));
+      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, paneBusy[i] || paneWaiting[i] ? 0 : Math.min(READY_TICKS, (before[id] ?? READY_TICKS) + 1)]] : [])));
       panes = raw.panes.map((x, i) => (tr.paneQuiet[x.id] === undefined ? x : { ...x, agent: paneWaiting[i] ? 'waiting' : tr.paneQuiet[x.id]! >= READY_TICKS ? 'ready' : 'busy' }));
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;

@@ -83,9 +83,11 @@ export function alertsFor(memory: Map<string, AlertMemory>, snapshot: Snapshot):
     // 일을 마친 터미널마다 "작업 끝남"을 알린다. 다른 터미널이 아직 일해 세션이 실행 중이어도 (입력 대기·오류 등은 그쪽 알림이 간다)
     const byPane = state === 'idle' || state === 'running' ? finished : [];
     for (const x of byPane) alerts.push({ title: `NightShift · ${p.name}: 작업 끝남${where(x)}`, message: '작업을 마치고 다음 지시를 기다리는 중', projectId: p.id, state: 'idle', pane: x.id });
-    // 에이전트가 할 일을 마친 유휴는 "작업 끝남" 으로 알린다 (터미널마다 알렸으면 그걸로 됐다)
-    const label = state === 'idle' && p.tmux.agent === 'ready' ? '작업 끝남' : ALERT_STATES[state];
-    if (m.state !== state && label && !(state === 'idle' && byPane.length)) {
+    // 에이전트가 할 일을 마친 유휴는 "작업 끝남" 으로 알린다. 에이전트 터미널을 아는 세션은 위에서 터미널마다 알린다
+    // (일하던 터미널을 닫아 세션이 쉬게 된 것은 끝남이 아니다)
+    const done = state === 'idle' && p.tmux.agent === 'ready';
+    const label = done ? '작업 끝남' : ALERT_STATES[state];
+    if (m.state !== state && label && !(done && agents.length)) {
       const alert = { title: `NightShift · ${p.name}: ${label}`, message: state === 'waiting' && p.tmux.waitingPrompt ? `입력 대기: ${p.tmux.waitingPrompt}` : p.status.reasons.join(', ') || label, projectId: p.id, state };
       // 유휴는 정지 의심으로 가는 길목이라 반복 판단에 끼우지 않는다 (기본으로는 보내지도 않는다).
       if (state === 'idle') alerts.push(alert);
