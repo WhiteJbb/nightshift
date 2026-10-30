@@ -953,12 +953,12 @@ test('on a touch screen, a held Backspace in the empty input keeps repeating: ke
   expect(box().value).toBe('\u200b');
   act(() => replies.shift()!());
   await tick();
-  // 친 글은 숨은 글자 없이 보내고, 입력칸을 떠나면 비워 안내 글이 보이게 한다
-  fireEvent.change(box(), { target: { value: '\u200b안녕' } });
+  // 친 글은 숨은 글자 없이 보내고(붙여 넣은 같은 글자는 그대로), 입력칸을 떠나면 비워 안내 글이 보이게 한다
+  fireEvent.change(box(), { target: { value: '\u200b안\u200b녕' } });
   fireEvent.click(screen.getByRole('button', { name: '보내기' }));
   act(() => replies.shift()!());
   await tick();
-  expect(posts().slice(2).map(([, b]) => b.text ?? b.key)).toEqual(['BSpace', '안녕']);
+  expect(posts().slice(2).map(([, b]) => b.text ?? b.key)).toEqual(['BSpace', '안\u200b녕']);
   act(() => input.blur());
   expect(box().value).toBe('');
   // 응답을 기다리는 사이 누른 키는, 그 화면을 떠나면 보내지 않는다

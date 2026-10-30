@@ -250,6 +250,8 @@ const CTRL: Record<string, InputKey> = { c: 'C-c', d: 'C-d', u: 'C-u', l: 'C-l' 
  * 보이지 않는 글자 하나를 두어 계속 되풀이하게 하고, 그 Backspace 는 막아 pane 으로 넘긴다. 보낼 때는 뺀다
  */
 const KEEP = '\u200b';
+/** 입력칸 값에서 넣어 둔 KEEP 을 뺀 글. 늘 맨 앞에 넣으므로 그것만 뺀다 (사용자가 붙여 넣은 같은 글자는 그대로) */
+const typed = (raw: string) => (!finePointer() && raw.startsWith(KEEP) ? raw.slice(1) : raw);
 /** 한 번에 묶어 보낼 수 있는 같은 키 수 (서버의 MAX_KEY_COUNT) */
 const MAX_KEY_COUNT = 100;
 
@@ -295,7 +297,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   const pane = target?.id ?? '';
   // raw: 입력칸 그대로 (휴대폰에선 KEEP 이 섞인다). 한글 조합 중에 값을 고치면 조합이 깨지므로 raw 는 그대로 두고 text 로 읽는다
   const [raw, setRaw] = useState('');
-  const text = raw.replaceAll(KEEP, '');
+  const text = typed(raw);
   const [moreKeys, setMoreKeys] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,7 +320,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
         .then(
           ({ path }) => {
             setRaw((cur) => {
-              const c = cur.replaceAll(KEEP, '');
+              const c = typed(cur);
               return `${c.trimEnd()}${c.trim() ? ' ' : ''}${path} `;
             });
             inputRef.current?.focus();
@@ -359,13 +361,15 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
     if (body.text !== undefined || finePointer()) inputRef.current?.focus();
     // 보낼 pane 이 없거나, 이미지 경로가 아직 안 들어왔는데 프롬프트를 제출하려 하면 보내지 않는다
     if (!target || (uploading > 0 && (body.text !== undefined || body.key === 'Enter'))) return;
-    if (sending.current) {
+    if (!sending.current) post(body);
+    else if (body.key !== undefined) {
       const last = queued.current.at(-1);
-      if (body.key === undefined) return;
       if (last && last.key === body.key && last.pane === body.pane && (last.count ?? 1) < MAX_KEY_COUNT) last.count = (last.count ?? 1) + 1;
       else queued.current.push({ ...body });
-      return;
     }
+  };
+  /** 확인을 마친 입력을 보낸다. 끝나면 그사이 모아 둔 키를 이어서 보낸다 (모을 때 확인했으니 다시 보지 않는다) */
+  const post = (body: InputRequest) => {
     sending.current = true;
     setBusy(true);
     const sent = body.text;
@@ -380,7 +384,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
           // 보내지 못한 글은 되돌려 놓는다. 그사이 새로 친 글이 있으면 그 앞에 붙여 둘 다 남긴다
           if (sent !== undefined)
             setRaw((cur) => {
-              const c = cur.replaceAll(KEEP, '');
+              const c = typed(cur);
               return c === '' ? sent : `${sent}\n${c}`;
             });
         },
@@ -389,7 +393,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
         sending.current = false;
         setBusy(false);
         const next = queued.current.shift();
-        if (next) send(next);
+        if (next) post(next);
       });
   };
   const sendText = (enter: boolean) => {
@@ -464,8 +468,8 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
             if (e.target.value === '' && raw === KEEP) send({ pane, key: 'BSpace' });
             setRaw(e.target.value === '' ? empty() : e.target.value);
           }}
-          onFocus={() => setRaw((cur) => (cur.replaceAll(KEEP, '') === '' ? empty() : cur))}
-          onBlur={() => setRaw((cur) => (cur.replaceAll(KEEP, '') === '' ? '' : cur))}
+          onFocus={() => setRaw((cur) => (typed(cur) === '' ? empty() : cur))}
+          onBlur={() => setRaw((cur) => (typed(cur) === '' ? '' : cur))}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onDrop={onDrop}
