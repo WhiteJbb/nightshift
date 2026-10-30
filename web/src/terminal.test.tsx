@@ -958,7 +958,13 @@ test('on a touch screen, a held Backspace in the empty input keeps repeating: ke
   fireEvent.click(screen.getByRole('button', { name: '보내기' }));
   act(() => replies.shift()!());
   await tick();
-  expect(posts().slice(2).map(([, b]) => b.text ?? b.key)).toEqual(['BSpace', '안\u200b녕']);
+  // 커서를 맨 앞으로 옮겨 앞에 쳐도 넣어 둔 글자는 빠진다
+  fireEvent.change(box(), { target: { value: '\u200bls' } });
+  fireEvent.change(box(), { target: { value: 'sudo \u200bls' } });
+  fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+  act(() => replies.shift()!());
+  await tick();
+  expect(posts().slice(2).map(([, b]) => b.text ?? b.key)).toEqual(['BSpace', '안\u200b녕', 'sudo ls']);
   act(() => input.blur());
   expect(box().value).toBe('');
   // 응답을 기다리는 사이 누른 키는, 그 화면을 떠나면 보내지 않는다

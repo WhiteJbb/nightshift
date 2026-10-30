@@ -250,8 +250,12 @@ const CTRL: Record<string, InputKey> = { c: 'C-c', d: 'C-d', u: 'C-u', l: 'C-l' 
  * 보이지 않는 글자 하나를 두어 계속 되풀이하게 하고, 그 Backspace 는 막아 pane 으로 넘긴다. 보낼 때는 뺀다
  */
 const KEEP = '\u200b';
-/** 입력칸 값에서 넣어 둔 KEEP 을 뺀 글. 늘 맨 앞에 넣으므로 그것만 뺀다 (사용자가 붙여 넣은 같은 글자는 그대로) */
-const typed = (raw: string) => (!finePointer() && raw.startsWith(KEEP) ? raw.slice(1) : raw);
+/** 입력칸: value 는 칸에 보이는 그대로, kept 는 그 안에 넣어 둔 KEEP 이 아직 있는지 (커서를 옮겨 앞에 쳐도 따라간다) */
+type Field = { value: string; kept: boolean };
+const NO_TEXT: Field = { value: '', kept: false };
+/** 넣어 둔 KEEP 을 뺀 글. 같은 글자라 어느 것을 하나 빼도 결과가 같다 (사용자가 붙여 넣은 같은 글자는 남는다) */
+const typed = (f: Field) => (f.kept ? f.value.replace(KEEP, '') : f.value);
+const keeps = (s: string) => s.split(KEEP).length - 1;
 /** 한 번에 묶어 보낼 수 있는 같은 키 수 (서버의 MAX_KEY_COUNT) */
 const MAX_KEY_COUNT = 100;
 
@@ -295,9 +299,9 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   // ponytail: 이름이 claude 인 pane 만 알아본다. npm 으로 깐 Claude Code 는 node 로 보여 "지금 보내기"가 없다
   const claude = target !== null && progName(target) === 'claude';
   const pane = target?.id ?? '';
-  // raw: 입력칸 그대로 (휴대폰에선 KEEP 이 섞인다). 한글 조합 중에 값을 고치면 조합이 깨지므로 raw 는 그대로 두고 text 로 읽는다
-  const [raw, setRaw] = useState('');
-  const text = typed(raw);
+  // 휴대폰에선 KEEP 이 섞인다. 한글 조합 중에 값을 고치면 조합이 깨지므로 칸의 값은 그대로 두고 text 로 읽는다
+  const [field, setField] = useState<Field>(NO_TEXT);
+  const text = typed(field);
   const [moreKeys, setMoreKeys] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -305,8 +309,8 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   const [uploading, setUploading] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  /** 비운 입력칸의 값: 휴대폰에서 입력칸을 쓰는 중이면 KEEP */
-  const empty = () => (!finePointer() && document.activeElement === inputRef.current ? KEEP : '');
+  /** 비운 입력칸: 휴대폰에서 입력칸을 쓰는 중이면 KEEP 하나 */
+  const empty = (): Field => (!finePointer() && document.activeElement === inputRef.current ? { value: KEEP, kept: true } : NO_TEXT);
 
   // 이미지는 서버에 파일로 저장하고 그 경로를 입력 칸에 넣는다. Claude Code·Codex 는 프롬프트 안의 이미지 경로를 첨부로 읽는다.
   const attach = (file: File | undefined) => {
@@ -319,9 +323,9 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
         .upload(projectId, { type: file.type, data: String(reader.result).split(',')[1] ?? '' })
         .then(
           ({ path }) => {
-            setRaw((cur) => {
+            setField((cur) => {
               const c = typed(cur);
-              return `${c.trimEnd()}${c.trim() ? ' ' : ''}${path} `;
+              return { value: `${c.trimEnd()}${c.trim() ? ' ' : ''}${path} `, kept: false };
             });
             inputRef.current?.focus();
           },
@@ -373,7 +377,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
     sending.current = true;
     setBusy(true);
     const sent = body.text;
-    if (sent !== undefined) setRaw(empty());
+    if (sent !== undefined) setField(empty());
     api
       .sendInput(projectId, body)
       .then(
@@ -383,9 +387,9 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
           queued.current = [];
           // 보내지 못한 글은 되돌려 놓는다. 그사이 새로 친 글이 있으면 그 앞에 붙여 둘 다 남긴다
           if (sent !== undefined)
-            setRaw((cur) => {
+            setField((cur) => {
               const c = typed(cur);
-              return c === '' ? sent : `${sent}\n${c}`;
+              return { value: c === '' ? sent : `${sent}\n${c}`, kept: false };
             });
         },
       )
@@ -462,14 +466,16 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
           spellCheck={false}
           maxLength={20000}
           rows={Math.min(8, text.split('\n').length)}
-          value={raw}
+          value={field.value}
           onChange={(e) => {
+            const value = e.target.value;
             // 비어 보이는 칸에서 KEEP 이 지워졌으면(키를 읽지 못한 키보드) 그게 pane 의 Backspace 다
-            if (e.target.value === '' && raw === KEEP) send({ pane, key: 'BSpace' });
-            setRaw(e.target.value === '' ? empty() : e.target.value);
+            if (value === '' && field.kept && field.value === KEEP) send({ pane, key: 'BSpace' });
+            // KEEP 이 줄었으면 지운 것이다 (사용자가 넣은 같은 글자를 지웠어도 남는 글은 같다)
+            setField((cur) => (value === '' ? empty() : { value, kept: cur.kept && keeps(value) >= keeps(cur.value) }));
           }}
-          onFocus={() => setRaw((cur) => (typed(cur) === '' ? empty() : cur))}
-          onBlur={() => setRaw((cur) => (typed(cur) === '' ? '' : cur))}
+          onFocus={() => setField((cur) => (typed(cur) === '' ? empty() : cur))}
+          onBlur={() => setField((cur) => (typed(cur) === '' ? NO_TEXT : cur))}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onDrop={onDrop}
