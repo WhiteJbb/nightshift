@@ -188,6 +188,26 @@ export async function workDirs(session: string): Promise<{ pid: number; ppid: nu
   return procs.map(({ pid, ppid, shell }) => ({ pid, ppid, shell, dir: cwds.get(pid) ?? '' })).filter((p) => p.dir);
 }
 
+/** lsof -Fp("p<pid>" 줄)나 ss -p("pid=<pid>") 출력의 pid 들 */
+export const listenerPids = (out: string): number[] => [...out.matchAll(/(?:^p|pid=)(\d+)/gm)].map((m) => Number(m[1]));
+
+/**
+ * pane 아래에서 TCP 포트를 열고 기다리는 프로세스(개발 서버 등)가 있는지. 못 읽었으면 null.
+ * 에이전트가 턴을 끝내며 남긴 셸이 계속 떠 있을 서버인지, 끝나면 알려 올 작업(빌드·학습·폴링 등)인지 가른다
+ */
+export async function serving(pane: string): Promise<boolean | null> {
+  const [root, ps] = await Promise.all([run('tmux', ['display-message', '-p', '-t', pane, '#{pane_pid}']), run('ps', ['-A', '-o', 'pid=,ppid=,etime=,comm='])]);
+  if (root.code !== 0 || ps.code !== 0) return null;
+  const tree = new Set(descendants(ps.stdout, [Number(root.stdout.trim())]).map((p) => p.pid));
+  // lsof 는 찾은 게 없어도 1 로 끝나니 실행하지 못했을 때만 모른다. ss 는 실패하면 모른다
+  const linux = process.platform === 'linux';
+  const r = linux ? await run('ss', ['-ltnpH']) : await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp']);
+  if (r.code === null || (linux && r.code !== 0)) return null;
+  // ponytail: pane 전체에서 하나라도 포트를 열면 서버로 본다. 서버와 작업을 함께 남기면 예전처럼 쉬는 중이 된다.
+  // 어느 자식이 어느 셸인지는 MCP 서버·caffeinate·상태줄 명령·exec 된 셸이 섞여 있어 믿을 만하게 가르기 어렵다
+  return listenerPids(r.stdout).some((pid) => tree.has(pid));
+}
+
 /** SGR 만 남긴 줄들. 끝의 빈 줄을 버리고 최근 limit 줄만 남긴다. */
 export function cleanOutput(out: string, limit = OUTPUT_LINES): string[] {
   const lines = keepSgr(out)
