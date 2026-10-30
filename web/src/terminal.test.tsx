@@ -961,6 +961,15 @@ test('on a touch screen, a held Backspace in the empty input keeps repeating: ke
   expect(posts().slice(2).map(([, b]) => b.text ?? b.key)).toEqual(['BSpace', '안녕']);
   act(() => input.blur());
   expect(box().value).toBe('');
+  // 응답을 기다리는 사이 누른 키는, 그 화면을 떠나면 보내지 않는다
+  fireEvent.keyDown(box(), { key: 'Backspace', keyCode: 8 });
+  fireEvent.keyDown(box(), { key: 'Backspace', keyCode: 8 });
+  await tick();
+  const before = posts().length;
+  cleanup();
+  act(() => replies.shift()!());
+  await tick();
+  expect(posts()).toHaveLength(before);
 });
 
 test('fits an unattached session to the screen it is opened on, once; an attached one is left alone', async () => {

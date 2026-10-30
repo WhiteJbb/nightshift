@@ -351,6 +351,8 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   // 꾹 누른 Backspace 는 응답보다 빨리 되풀이되므로 같은 키는 몇 번인지로 묶는다. 모아 둔 만큼만 보내니 떼면 곧 멈춘다
   const sending = useRef(false);
   const queued = useRef<InputRequest[]>([]);
+  // 다른 pane 을 고르거나 화면을 떠나면 모아 둔 키는 버린다 (보지 않는 세션을 건드리지 않게)
+  useEffect(() => () => void (queued.current = []), [pane]);
   const send = (body: InputRequest) => {
     // 글을 보낸 뒤에는 이어서 칠 수 있게 입력 칸에 포커스를 둔다.
     // 키 버튼은 마우스 환경에서만 포커스를 되돌린다 (터치 화면에서 PgUp 을 누를 때마다 키보드가 뜨지 않게).
@@ -462,8 +464,8 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
             if (e.target.value === '' && raw === KEEP) send({ pane, key: 'BSpace' });
             setRaw(e.target.value === '' ? empty() : e.target.value);
           }}
-          onFocus={() => text === '' && setRaw(empty())}
-          onBlur={() => text === '' && setRaw('')}
+          onFocus={() => setRaw((cur) => (cur.replaceAll(KEEP, '') === '' ? empty() : cur))}
+          onBlur={() => setRaw((cur) => (cur.replaceAll(KEEP, '') === '' ? '' : cur))}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onDrop={onDrop}
