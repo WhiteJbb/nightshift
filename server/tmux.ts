@@ -199,9 +199,12 @@ export async function serving(pane: string): Promise<boolean | null> {
   const [root, ps] = await Promise.all([run('tmux', ['display-message', '-p', '-t', pane, '#{pane_pid}']), run('ps', ['-A', '-o', 'pid=,ppid=,etime=,comm='])]);
   if (root.code !== 0 || ps.code !== 0) return null;
   const tree = new Set(descendants(ps.stdout, [Number(root.stdout.trim())]).map((p) => p.pid));
-  // lsof 는 찾은 게 없으면 1 로 끝난다. 실행하지 못했을 때만 모른다
-  const r = process.platform === 'linux' ? await run('ss', ['-ltnpH']) : await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp']);
-  if (r.code === null) return null;
+  // lsof 는 찾은 게 없어도 1 로 끝나니 실행하지 못했을 때만 모른다. ss 는 실패하면 모른다
+  const linux = process.platform === 'linux';
+  const r = linux ? await run('ss', ['-ltnpH']) : await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp']);
+  if (r.code === null || (linux && r.code !== 0)) return null;
+  // ponytail: pane 전체에서 하나라도 포트를 열면 서버로 본다. 서버와 작업을 함께 남기면 예전처럼 쉬는 중이 된다.
+  // 어느 자식이 어느 셸인지는 MCP 서버·caffeinate·상태줄 명령·exec 된 셸이 섞여 있어 믿을 만하게 가르기 어렵다
   return listenerPids(r.stdout).some((pid) => tree.has(pid));
 }
 
