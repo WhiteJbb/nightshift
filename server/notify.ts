@@ -34,9 +34,9 @@ export interface AlertMemory {
 }
 
 /** 재시작해도 이어지게 저장하는 부분 */
-export type SavedAlerts = Record<string, Pick<AlertMemory, 'state' | 'alertedState' | 'lastAlert'>>;
+export type SavedAlerts = Record<string, Pick<AlertMemory, 'state' | 'alertedState' | 'lastAlert' | 'panes'>>;
 
-export const exportAlerts = (memory: Map<string, AlertMemory>): SavedAlerts => Object.fromEntries([...memory].map(([id, m]) => [id, { state: m.state, alertedState: m.alertedState, lastAlert: m.lastAlert }]));
+export const exportAlerts = (memory: Map<string, AlertMemory>): SavedAlerts => Object.fromEntries([...memory].map(([id, m]) => [id, { state: m.state, alertedState: m.alertedState, lastAlert: m.lastAlert, panes: m.panes }]));
 
 export const restoreAlerts = (saved: SavedAlerts | undefined): Map<string, AlertMemory> =>
   new Map(Object.entries(saved ?? {}).map(([id, m]) => [id, { ...m, activity: 0, lastOutputAt: undefined, lastGitAt: undefined }]));
@@ -78,10 +78,12 @@ export function alertsFor(memory: Map<string, AlertMemory>, snapshot: Snapshot):
     m.lastGitAt = gitAt;
     // 이번에 일을 마친 에이전트 터미널. 한 세션에 에이전트가 여럿이면 어느 터미널인지 제목에 붙인다
     const finished = agents.filter((x) => x.agent === 'ready' && m.panes?.[x.id] !== undefined && m.panes[x.id] !== 'ready');
-    m.panes = paneStates;
     const where = (x: TmuxPane) => (agents.length < 2 ? '' : ` (터미널 ${p.tmux.panes.some((y) => y.window === x.window && y.id !== x.id) ? `${x.window}.${x.index}` : x.window})`);
-    // 일을 마친 터미널마다 "작업 끝남"을 알린다. 다른 터미널이 아직 일해 세션이 실행 중이어도 (입력 대기·오류 등은 그쪽 알림이 간다)
-    const byPane = state === 'idle' || state === 'running' ? finished : [];
+    // 일을 마친 터미널마다 "작업 끝남"을 알린다. 다른 터미널이 아직 일해 세션이 실행 중이어도.
+    // 입력 대기·오류 등이면 그쪽 알림이 가므로 미루고, 끝나기 전 상태를 기억해 두어 풀리면 알린다
+    const eligible = state === 'idle' || state === 'running';
+    const byPane = eligible ? finished : [];
+    m.panes = eligible ? paneStates : { ...paneStates, ...Object.fromEntries(finished.map((x) => [x.id, m.panes![x.id]!])) };
     for (const x of byPane) alerts.push({ title: `NightShift · ${p.name}: 작업 끝남${where(x)}`, message: '작업을 마치고 다음 지시를 기다리는 중', projectId: p.id, state: 'idle', pane: x.id });
     // 에이전트가 할 일을 마친 유휴는 "작업 끝남" 으로 알린다. 에이전트 터미널을 아는 세션은 위에서 터미널마다 알린다
     // (일하던 터미널을 닫아 세션이 쉬게 된 것은 끝남이 아니다)

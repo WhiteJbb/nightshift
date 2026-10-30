@@ -213,6 +213,14 @@ describe('alerts', () => {
     const closed = at('idle', 'ready', 'ready');
     closed.projects[0]!.tmux.panes.pop();
     expect(alertsFor(memory, closed)).toEqual([]);
+    // 오류로 판정된 사이에 끝났으면, 오류가 풀릴 때 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    alertsFor(memory, at('error', 'ready', 'busy'));
+    expect(alertsFor(memory, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    // 끝나는 중에 재시작해도 이어서 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    const restored = restoreAlerts(JSON.parse(JSON.stringify(exportAlerts(memory))));
+    expect(alertsFor(restored, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
 
     // 0번 터미널을 보고 있어도 1번의 끝남은 미루지 않는다 (잠깐 기다리는 것만). 0번은 그만 보면, 1번이 다시 일해도 보낸다.
     // 기다리는 사이 그 터미널이 다시 일하면 버린다
