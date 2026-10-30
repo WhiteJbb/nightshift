@@ -224,6 +224,8 @@ export class Monitor {
   /** 디스크에 저장할 상태 (기준점, 변경 시각, 로그 위치와 확인 전 오류). */
   exportState(): MonitorState {
     const tracked: MonitorState['tracked'] = {};
+    // ponytail: 설정에 없는(자동으로 찾은) 세션은 저장하지 않아 재시작하면 처음부터 본다 (터미널별 작업 끝남 기억도).
+    // 그런 세션을 오래 쓰게 되면 id 로 함께 저장한다
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
       if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
