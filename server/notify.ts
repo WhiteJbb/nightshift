@@ -143,13 +143,13 @@ export function gateAlerts(
 }
 
 /**
- * 미뤄 둔 알림이 아직 맞는지. 터미널 하나의 작업 끝남은 그 터미널이 계속 쉬는 동안 맞다 (다른 터미널이 다시 일해도).
+ * 미뤄 둔 알림이 아직 맞는지. 터미널 하나의 작업 끝남은 그 터미널이 계속 쉬는 동안 맞다
+ * (다른 터미널이 다시 일하거나 세션이 잠깐 오류·입력 대기여도: 다시 만들 수 없으니 버리지 않는다).
  * 나머지는 세션 상태가 그대로일 때
  */
 export function stillTrue(snapshot: Snapshot, a: Alert): boolean {
   const p = snapshot.projects.find((x) => x.id === a.projectId);
   if (!p) return false;
-  const state = p.tmux.exists && p.tmux.waitingPrompt ? 'waiting' : p.status.state;
-  if (a.pane) return (state === 'idle' || state === 'running') && p.tmux.panes.find((x) => x.id === a.pane)?.agent === 'ready';
-  return state === a.state;
+  if (a.pane) return p.tmux.panes.find((x) => x.id === a.pane)?.agent === 'ready';
+  return (p.tmux.exists && p.tmux.waitingPrompt ? 'waiting' : p.status.state) === a.state;
 }
