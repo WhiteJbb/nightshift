@@ -221,6 +221,9 @@ describe('alerts', () => {
     alertsFor(memory, at('running', 'busy', 'busy'));
     const restored = restoreAlerts(JSON.parse(JSON.stringify(exportAlerts(memory))));
     expect(alertsFor(restored, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    // 터미널별 기억이 없는 예전 상태 파일에서 되살렸으면 세션 단위로 알린다
+    const old = restoreAlerts({ a: { state: 'running', alertedState: null, lastAlert: {} } });
+    expect(alertsFor(old, at('idle', 'ready', 'ready')).map((x) => [x.title, x.pane])).toEqual([['NightShift · A: 작업 끝남', undefined]]);
 
     // 0번 터미널을 보고 있어도 1번의 끝남은 미루지 않는다 (잠깐 기다리는 것만). 0번은 그만 보면, 1번이 다시 일하거나 세션이 오류여도 보낸다.
     // 기다리는 사이 그 터미널이 다시 일하면 버린다
