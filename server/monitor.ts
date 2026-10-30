@@ -110,6 +110,8 @@ interface Tracked {
   agent: boolean;
   /** 작업 중 표시가 연달아 보이지 않은 tick 수 (도구 호출 사이의 잠깐 빈 틈을 "끝남"으로 보지 않게) */
   quietTicks: number;
+  /** 에이전트 pane 마다의 quietTicks (READY_TICKS 까지만 센다). 한 세션에 에이전트가 여럿이면 터미널마다 따로 끝남을 알린다 */
+  paneQuiet: Record<string, number>;
   /** 작업 중 표시를 마지막으로 본 시각. 스크롤·입력칸 타이핑도 화면을 바꾸지만 그건 일이 아니다 (대시보드 순서에 쓴다) */
   busyAt: string | null;
 }
@@ -174,7 +176,7 @@ export class Monitor {
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
       // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
-      if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, busyAt: saved.busyAt ?? null });
+      if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, paneQuiet: saved.paneQuiet ?? {}, busyAt: saved.busyAt ?? null });
       if (saved?.looked) this.looked.set(p.id, saved.looked);
     }
     this.snapshot = this.build();
@@ -222,9 +224,11 @@ export class Monitor {
   /** 디스크에 저장할 상태 (기준점, 변경 시각, 로그 위치와 확인 전 오류). */
   exportState(): MonitorState {
     const tracked: MonitorState['tracked'] = {};
+    // ponytail: 설정에 없는(자동으로 찾은) 세션은 저장하지 않아 재시작하면 처음부터 본다 (터미널별 작업 끝남 기억도).
+    // 그런 세션을 오래 쓰게 되면 id 로 함께 저장한다
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
     return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
@@ -455,6 +459,7 @@ export class Monitor {
     let waitingPrompt: string | null = null;
     let waitingChoices: TmuxInfo['waitingChoices'];
     let agent: TmuxInfo['agent'];
+    let panes = raw.panes;
     if (raw.exists) {
       // 어느 pane 이든 출력이 바뀌면 활동이다. pane 정보가 없으면 활성 pane 출력만 본다.
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
@@ -463,15 +468,16 @@ export class Monitor {
       const byId = ids.map((id, i) => ({ id, i, cols: raw.panes[i]?.cols ?? 0 })).sort((a, b) => a.id.localeCompare(b.id));
       const norm = (s: string) => (this.opts.config.ignoreSpinnerChanges ? stripVolatile(s) : s);
       const text = norm(byId.map((x) => plain[x.i]!.join('\n')).join('\f'));
-      plain.forEach((lines, i) => {
-        if (waitingPrompt !== null) return;
-        // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다. 패턴을 비워 입력 대기 감지를 껐으면 보지 않는다
+      // 선택지 질문은 질문 본문에 "Do you want to" 같은 말이 있어도 그 구조로 먼저 읽는다. 패턴을 비워 입력 대기 감지를 껐으면 보지 않는다
+      const asking = plain.map((lines) => {
         const asked = this.opts.config.promptPatterns.length ? askedQuestion(lines) : null;
-        waitingPrompt = asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns);
-        const pane = raw.panes[i];
-        const options = asked?.choices ?? (waitingPrompt !== null && pane ? promptChoices(lines, waitingPrompt) : []);
-        if (pane && options.length) waitingChoices = { pane: pane.id, options };
+        return { asked, prompt: asked?.prompt ?? findPrompt(lines, this.opts.config.promptPatterns) };
       });
+      const ask = asking.findIndex((x) => x.prompt !== null);
+      waitingPrompt = asking[ask]?.prompt ?? null;
+      const pane = raw.panes[ask];
+      const options = waitingPrompt === null ? [] : (asking[ask]!.asked?.choices ?? (pane ? promptChoices(plain[ask]!, waitingPrompt) : []));
+      if (pane && options.length) waitingChoices = { pane: pane.id, options };
       // 보는 화면에 맞춰 pane 크기를 바꾸면 프로그램이 화면을 다시 그린다. 그 변화로 "실행 중"이 되지 않게 잠시 무시한다
       const sizeKey = raw.panes.length ? byId.map((x) => `${x.id}:${x.cols}`).join(',') : '';
       if (tr.sizeKey !== null && sizeKey !== tr.sizeKey) tr.settle = RESIZE_SETTLE_TICKS;
@@ -498,18 +504,24 @@ export class Monitor {
         const tailOf = (x: string, y: string) => x === y || x.endsWith(`\n${y}`);
         return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
       };
-      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
+      const paneBusy = plain.map((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
+      const busy = paneBusy.some(Boolean);
       // 셸만 남기고 턴을 끝냈으면 그 셸을 본다: 포트를 열고 기다리는 개발 서버면 쉬는 중이고, 아니면(빌드·학습·폴링 등)
       // 끝날 때 Claude Code 가 알려 받아 이어서 일하므로 기다리는 중이다. 프로세스를 못 읽으면 쉬는 중으로 둔다
-      const shellJob = async () => {
-        for (const [i, lines] of plain.entries()) if (raw.panes[i] && waitingOnShells(lines) && (await this.opts.collector.serving?.(raw.panes[i].id)) === false) return true;
-        return false;
-      };
-      const waiting = !busy && (plain.some(waitingOnBackground) || (await shellJob()));
+      const paneWaiting = await Promise.all(
+        plain.map(async (lines, i) => !paneBusy[i] && (waitingOnBackground(lines) || (raw.panes[i] !== undefined && waitingOnShells(lines) && (await this.opts.collector.serving?.(raw.panes[i].id)) === false))),
+      );
+      const waiting = !busy && paneWaiting.some(Boolean);
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
-      if (busy || waiting || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
+      const isAgent = (i: number) => paneBusy[i] || paneWaiting[i] || /claude|codex/i.test(raw.panes[i]?.command ?? '');
+      if (plain.some((_, i) => isAgent(i))) tr.agent = true;
       tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = waiting ? 'waiting' : tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
+      const before = tr.paneQuiet;
+      // 질문에 답을 기다리는 터미널은 일을 마친 게 아니라 일하는 도중이다
+      const working = (i: number) => paneBusy[i] || paneWaiting[i] || asking[i]!.prompt !== null;
+      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, working(i) ? 0 : Math.min(READY_TICKS, (before[id] ?? READY_TICKS) + 1)]] : [])));
+      panes = raw.panes.map((x, i) => (tr.paneQuiet[x.id] === undefined ? x : { ...x, agent: paneWaiting[i] ? 'waiting' : tr.paneQuiet[x.id]! >= READY_TICKS ? 'ready' : 'busy' }));
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;
       tr.seen = seen;
@@ -522,6 +534,7 @@ export class Monitor {
     } else {
       tr.output = null;
       tr.seen = null;
+      tr.paneQuiet = {};
       tr.outputChangedAt = null;
       tr.busyAt = null;
     }
@@ -531,7 +544,7 @@ export class Monitor {
       git,
       since,
       lastGitChangeAt: latest(git.recentCommits[0]?.date ?? null, tr.gitChangedAt),
-      tmux: { ...raw, lastOutputChangeAt, waitingPrompt, ...(waitingChoices ? { waitingChoices } : {}), ...(agent ? { agent, lastBusyAt: tr.busyAt } : {}) },
+      tmux: { ...raw, panes, lastOutputChangeAt, waitingPrompt, ...(waitingChoices ? { waitingChoices } : {}), ...(agent ? { agent, lastBusyAt: tr.busyAt } : {}) },
       logErrors,
     };
   }
@@ -605,7 +618,7 @@ const tailRun = (r: RunResult | null): RunResult | null => {
   if (!r || (r.stdout.length <= SNAPSHOT_OUTPUT_CHARS && r.stderr.length <= SNAPSHOT_OUTPUT_CHARS)) return r;
   return { ...r, stdout: r.stdout.slice(-SNAPSHOT_OUTPUT_CHARS), stderr: r.stderr.slice(-SNAPSHOT_OUTPUT_CHARS), truncated: true };
 };
-const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, seen: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, busyAt: null });
+const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, seen: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, paneQuiet: {}, busyAt: null });
 
 const EMPTY_GIT: GitInfo = {
   ok: false,

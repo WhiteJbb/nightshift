@@ -123,6 +123,42 @@ describe('Monitor', () => {
     expect(again.snapshot.projects.find((p) => p.id === 'app')!.tmux.lastBusyAt).toBe(worked);
   });
 
+  it('keeps a separate agent state for each agent terminal in a session, and none for a plain shell', async () => {
+    let now = T0;
+    const pane = (id: string, window: number, command: string, lines: string[]) => ({ id, window, windowName: 'w', index: 0, command, active: window === 0, lines });
+    const working = ['• Working (3s • esc to interrupt)'];
+    const state = { panes: [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', working), pane('%3', 2, 'zsh', ['$ '])] };
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: null, output: [], panes: state.panes, waitingPrompt: null, attachCommand: 'x' }]]);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    const agents = () => m.snapshot.projects.find((p) => p.id === 'app')!.tmux.panes.map((x) => x.agent);
+    await m.tick();
+    expect(agents()).toEqual(['busy', 'busy', undefined]);
+    // 1번 터미널만 일을 마친다. 세션은 0번 때문에 계속 일하는 중
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', ['done', '› Ask Codex']), pane('%3', 2, 'zsh', ['$ '])];
+    for (let i = 0; i < READY_TICKS; i++) {
+      now += 5000;
+      await m.tick();
+    }
+    expect(agents()).toEqual(['busy', 'ready', undefined]);
+    expect(m.snapshot.projects.find((p) => p.id === 'app')!.tmux.agent).toBe('busy');
+    // 1번이 다시 일하다 승인을 묻고 있으면(그사이 작업 중 표시를 못 봤어도) 끝난 게 아니다
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', ['Do you want to proceed?', '❯ 1. Yes', '  2. No']), pane('%3', 2, 'zsh', ['$ '])];
+    now += 5000;
+    await m.tick();
+    expect(agents()).toEqual(['busy', 'busy', undefined]);
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'codex', ['done', '› Ask Codex']), pane('%3', 2, 'zsh', ['$ '])];
+    for (let i = 0; i < READY_TICKS; i++) {
+      now += 5000;
+      await m.tick();
+    }
+    // 1번에서 에이전트를 끄고 셸로 돌아온 뒤 재시작해도 그 터미널은 일을 마친 에이전트로 남는다
+    state.panes = [pane('%1', 0, 'codex', working), pane('%2', 1, 'zsh', ['$ ']), pane('%3', 2, 'zsh', ['$ '])];
+    const again = new Monitor({ config, collector, runs: noRuns, now: () => now, restore: JSON.parse(JSON.stringify(m.exportState())) });
+    await again.tick();
+    expect(again.snapshot.projects.find((p) => p.id === 'app')!.tmux.panes.map((x) => x.agent)).toEqual(['busy', 'ready', undefined]);
+  });
+
   it('does not count the redraw after a pane resize as activity', async () => {
     let now = T0;
     const pane = (cols: number, lines: string[]) => ({ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols, lines });

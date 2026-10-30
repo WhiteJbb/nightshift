@@ -6,7 +6,7 @@ import type { GitInfo, Snapshot } from '../shared/types.ts';
 import { DEFAULTS, defaultConfigPath, loadConfig } from './config.ts';
 import type { Collector } from './monitor.ts';
 import { Monitor, NO_LOG } from './monitor.ts';
-import { alertsFor, exportAlerts, FINISH_HOLD_MS, gateAlerts, MAC_ALERT_STATES, REALERT_COOLDOWN_MS, restoreAlerts } from './notify.ts';
+import { alertsFor, exportAlerts, FINISH_HOLD_MS, gateAlerts, MAC_ALERT_STATES, REALERT_COOLDOWN_MS, restoreAlerts, stillTrue } from './notify.ts';
 import { reloadConfig } from './reload.ts';
 import { Runner } from './runner.ts';
 
@@ -95,7 +95,7 @@ describe('reloadConfig', () => {
 describe('alerts', () => {
   const T0 = Date.parse('2026-10-16T00:00:00Z');
   const snap = (states: Record<string, string>, activity: Record<string, string | null> = {}, at = T0): Snapshot =>
-    ({ generatedAt: new Date(at).toISOString(), projects: Object.entries(states).map(([id, state]) => ({ id, name: id.toUpperCase(), status: { state, reasons: [`${state} reason`] }, tmux: { lastOutputChangeAt: activity[id] ?? null }, lastGitChangeAt: activity[`${id}.git`] ?? null })) }) as unknown as Snapshot;
+    ({ generatedAt: new Date(at).toISOString(), projects: Object.entries(states).map(([id, state]) => ({ id, name: id.toUpperCase(), status: { state, reasons: [`${state} reason`] }, tmux: { lastOutputChangeAt: activity[id] ?? null, panes: [] }, lastGitChangeAt: activity[`${id}.git`] ?? null })) }) as unknown as Snapshot;
 
   it('alerts on transitions into waiting, idle, stalled or error, never into running', () => {
     const prev = new Map();
@@ -173,9 +173,9 @@ describe('alerts', () => {
     const ask = { title: 'B: 입력 대기', message: '', projectId: 'b', state: 'waiting' as const };
     const err = { title: 'C: 오류', message: '', projectId: 'c', state: 'error' as const };
     let state: Record<string, string> = { a: 'idle', b: 'waiting', c: 'error' };
-    const stateNow = (id: string) => state[id] as never;
+    const stateNow = (a: { projectId: string; state: string }) => state[a.projectId] === a.state;
     const watching = new Set(['b']);
-    const watched = (id: string) => watching.has(id);
+    const watched = (a: { projectId: string }) => watching.has(a.projectId);
     expect(gateAlerts(deferred, [done, ask, err], 0, watched, stateNow)).toEqual([err]);
     expect(gateAlerts(deferred, [], FINISH_HOLD_MS - 1, watched, stateNow)).toEqual([]);
     expect(gateAlerts(deferred, [], FINISH_HOLD_MS, watched, stateNow)).toEqual([done]);
@@ -186,6 +186,57 @@ describe('alerts', () => {
     gateAlerts(deferred, [done], 0, watched, stateNow);
     state = { ...state, a: 'running' };
     expect(gateAlerts(deferred, [], FINISH_HOLD_MS, watched, stateNow)).toEqual([]);
+    expect(deferred.size).toBe(0);
+  });
+
+  it('with two agents in one session, each terminal is announced when it finishes, even while the other still works or is watched', () => {
+    const memory = new Map();
+    const at = (state: string, a1: string, a2: string) => {
+      const s = snap({ a: state });
+      const pane = (id: string, window: number, agent: string) => ({ id, window, index: 0, agent });
+      Object.assign(s.projects[0]!.tmux, { exists: true, agent: state === 'idle' ? 'ready' : 'busy', panes: [pane('%1', 0, a1), pane('%2', 1, a2)] });
+      return s;
+    };
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    // 1번 터미널은 쉬는데 2번은 아직 일한다: 세션은 실행 중이지만 1번의 끝남을 알린다
+    const first = alertsFor(memory, at('running', 'busy', 'ready'));
+    expect(first).toEqual([{ title: 'NightShift · A: 작업 끝남 (터미널 1)', message: '작업을 마치고 다음 지시를 기다리는 중', projectId: 'a', state: 'idle', pane: '%2' }]);
+    expect(alertsFor(memory, at('running', 'busy', 'ready'))).toEqual([]);
+    const last = alertsFor(memory, at('idle', 'ready', 'ready'));
+    expect(last.map((x) => [x.title, x.pane])).toEqual([['NightShift · A: 작업 끝남 (터미널 0)', '%1']]);
+    // 같은 때 둘 다 끝나도 하나씩 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    expect(alertsFor(memory, at('idle', 'ready', 'ready')).map((x) => x.pane)).toEqual(['%1', '%2']);
+    // 하나는 끝나고, 일하던 다른 하나를 닫아 세션이 쉬게 되면 끝난 쪽만 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    expect(alertsFor(memory, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    const closed = at('idle', 'ready', 'ready');
+    closed.projects[0]!.tmux.panes.pop();
+    expect(alertsFor(memory, closed)).toEqual([]);
+    // 오류로 판정된 사이에 끝났으면, 오류가 풀릴 때 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    alertsFor(memory, at('error', 'ready', 'busy'));
+    expect(alertsFor(memory, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    // 끝나는 중에 재시작해도 이어서 알린다
+    alertsFor(memory, at('running', 'busy', 'busy'));
+    const restored = restoreAlerts(JSON.parse(JSON.stringify(exportAlerts(memory))));
+    expect(alertsFor(restored, at('running', 'ready', 'busy')).map((x) => x.pane)).toEqual(['%1']);
+    // 터미널별 기억이 없는 예전 상태 파일에서 되살렸으면 세션 단위로 알린다
+    const old = restoreAlerts({ a: { state: 'running', alertedState: null, lastAlert: {} } });
+    expect(alertsFor(old, at('idle', 'ready', 'ready')).map((x) => [x.title, x.pane])).toEqual([['NightShift · A: 작업 끝남', undefined]]);
+
+    // 0번 터미널을 보고 있어도 1번의 끝남은 미루지 않는다 (잠깐 기다리는 것만). 0번은 그만 보면, 1번이 다시 일하거나 세션이 오류여도 보낸다.
+    // 기다리는 사이 그 터미널이 다시 일하면 버린다
+    const deferred = new Map();
+    let snapshot = at('idle', 'ready', 'ready');
+    const watched = (a: { pane?: string }) => a.pane === '%1';
+    expect(gateAlerts(deferred, [...first, ...last], 0, watched, (a) => stillTrue(snapshot, a))).toEqual([]);
+    expect(deferred.size).toBe(2);
+    expect(gateAlerts(deferred, [], FINISH_HOLD_MS, watched, (a) => stillTrue(snapshot, a))).toEqual(first);
+    snapshot = at('error', 'ready', 'busy');
+    expect(gateAlerts(deferred, [], FINISH_HOLD_MS, () => false, (a) => stillTrue(snapshot, a))).toEqual(last);
+    gateAlerts(deferred, first, 0, watched, (a) => stillTrue(snapshot, a));
+    expect(gateAlerts(deferred, [], FINISH_HOLD_MS, watched, (a) => stillTrue(snapshot, a))).toEqual([]);
     expect(deferred.size).toBe(0);
   });
 
