@@ -59,11 +59,16 @@ const WAITING_RE = /^✻ (?:(?:.* · )?Waiting for \d+ (?:background agents?|dyn
  * 입력칸 바로 위의 마지막 대화 항목(첫 칸에서 시작하는 줄과 이어지는 들여 쓴 줄)이 그 턴 끝 줄일 때만 본다:
  * 다 끝난 뒤의 짧은 후속 답에는 턴 끝 줄이 새로 붙지 않아 옛 줄이 화면에 남는다. 지난 대화를 올려 보는 중이면 보지 않는다
  */
-export function waitingOnBackground(lines: string[]): boolean {
-  if (scrolledUp(lines)) return false;
+export const waitingOnBackground = (lines: string[]): boolean => WAITING_RE.test(lastItem(lines));
+// 셸만 남기고 끝낸 턴 끝 줄 ("✻ Worked for 8s · done 11:48 PM · 1 shell still running")
+const SHELLS_RE = /^✻ .* · \d+ shells?\b.* still running/;
+/** 턴을 끝내며 백그라운드 셸을 남겼는지. 개발 서버처럼 계속 떠 있는 것일 수도 있어, 무엇인지는 프로세스로 따로 본다 */
+export const waitingOnShells = (lines: string[]): boolean => SHELLS_RE.test(lastItem(lines));
+/** 입력칸 바로 위의 마지막 대화 항목. 좁은 화면에선 턴 끝 줄이 다음 줄로 넘어가므로 들여 쓴 줄을 이어 붙인다 */
+function lastItem(lines: string[]): string {
+  if (scrolledUp(lines)) return '';
   const above = aboveInput(lines.filter((l) => l.trim() !== ''));
-  // 좁은 화면에선 턴 끝 줄이 다음 줄로 넘어가므로 항목을 이어 붙여 본다
-  return WAITING_RE.test(above.slice(above.findLastIndex((l) => /^\S/.test(l))).map((l) => l.trim()).join(' '));
+  return above.slice(above.findLastIndex((l) => /^\S/.test(l))).map((l) => l.trim()).join(' ');
 }
 /**
  * 화면의 절대경로("/…/dir/이름/…", "'~/…/dir/이름'")에 나온 dir 바로 아래 이름들. 많이 나온 것부터, 같으면 나중에 나온 것부터.

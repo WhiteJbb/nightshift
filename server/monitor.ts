@@ -6,10 +6,10 @@ import { NOT_A_REPO } from '../shared/types.ts';
 import type { Config, ProjectConfig } from './config.ts';
 import { collectGit, collectSince, repoRoot } from './git.ts';
 import type { LogPos, LogScan } from './logs.ts';
-import { aboveInput, askedQuestion, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
+import { aboveInput, askedQuestion, findPrompt, isBusy, mentionedIn, promptChoices, scanLog, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground, waitingOnShells } from './logs.ts';
 import type { MonitorState } from './state.ts';
 import { judge } from './status.ts';
-import { capturePane, listPanes, listSessions, workDirs } from './tmux.ts';
+import { capturePane, listPanes, listSessions, serving, workDirs } from './tmux.ts';
 
 export type RawTmux = Omit<TmuxInfo, 'lastOutputChangeAt'>;
 
@@ -26,6 +26,8 @@ export interface Collector {
   workDirs?(session: string): Promise<{ pid: number; ppid: number; dir: string; shell?: boolean }[] | null>;
   /** dir 이 든 저장소의 맨 위 폴더 (저장소가 아니면 null). 없으면 dir 을 그대로 쓴다 */
   repoRoot?(dir: string): Promise<string | null>;
+  /** pane 아래에서 포트를 열고 기다리는 프로세스(개발 서버 등)가 있는지. 못 읽었으면 null */
+  serving?(pane: string): Promise<boolean | null>;
 }
 
 /** 복사해서 붙여 넣을 명령이므로 셸에 안전하게 인용한다. */
@@ -44,6 +46,7 @@ export function realCollector(config: Config): Collector {
     logErrors: (p, pos) => (p.logFile ? scanLog(p.logFile, config.errorPatterns, config.errorIgnorePatterns, pos) : Promise.resolve(NO_LOG)),
     workDirs,
     repoRoot,
+    serving,
     // ponytail: tmux() 가 같은 목록을 다시 읽는다 (tick 당 ls 두 번). 느려지면 한 tick 안에서 캐시.
     async discover() {
       const [{ sessions }, panes] = await Promise.all([listSessions(), listPanes()]);
@@ -496,7 +499,13 @@ export class Monitor {
         return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
       };
       const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
-      const waiting = !busy && plain.some(waitingOnBackground);
+      // 셸만 남기고 턴을 끝냈으면 그 셸을 본다: 포트를 열고 기다리는 개발 서버면 쉬는 중이고, 아니면(빌드·학습·폴링 등)
+      // 끝날 때 Claude Code 가 알려 받아 이어서 일하므로 기다리는 중이다. 프로세스를 못 읽으면 쉬는 중으로 둔다
+      const shellJob = async () => {
+        for (const [i, lines] of plain.entries()) if (raw.panes[i] && waitingOnShells(lines) && (await this.opts.collector.serving?.(raw.panes[i].id)) === false) return true;
+        return false;
+      };
+      const waiting = !busy && (plain.some(waitingOnBackground) || (await shellJob()));
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
       if (busy || waiting || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
       tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;

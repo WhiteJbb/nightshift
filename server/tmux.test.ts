@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './exec.ts';
-import { aboveInput, askedQuestion, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground } from './logs.ts';
-import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
+import { aboveInput, askedQuestion, compileMatcher, findErrors, findPrompt, isBusy, promptChoices, scrolledUp, stripAnsi, stripVolatile, waitingOnBackground, waitingOnShells } from './logs.ts';
+import { agentOnTty, capturePane, cleanOutput, descendants, etimeSeconds, listenerPids, listPanes, listSessions, lsofCwds, MAX_PANES, parsePanes, resizeWindow, workDirs } from './tmux.ts';
 
 // 줄 세운 실행도 같은 가짜 run 으로 간다
 vi.mock('./exec.ts', () => {
@@ -78,6 +78,9 @@ describe('workDirs', () => {
         [30, '/home/me/repos/app'],
       ]),
     );
+    // 포트를 연 프로세스: lsof -Fp, ss -ltnpH (pid 가 여럿일 수 있다)
+    expect(listenerPids('p1197\np16691\n')).toEqual([1197, 16691]);
+    expect(listenerPids('LISTEN 0 511 0.0.0.0:5173 0.0.0.0:* users:(("node",pid=812,fd=21),("node",pid=813,fd=21))\n')).toEqual([812, 813]);
     if (process.platform === 'linux') return; // 리눅스는 /proc 을 읽는다
     mockRun.mockImplementation(async (bin) => ({
       code: 0,
@@ -282,6 +285,17 @@ describe('pattern helpers', () => {
     expect(waitingOnBackground(['⏺ ✻ Waiting for 1 background agent to finish', '─────', '❯ ', '─────', '  ⏵⏵ auto mode on (shift+tab to cycle)'])).toBe(false);
     // 일하는 중 판정과는 따로다
     expect(isBusy([...waiting, ...box], ['esc to interrupt'])).toBe(false);
+  });
+
+  it('sees a turn that ended leaving background shells, separately from agents and monitors', () => {
+    const box = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on · 2 shells · ↓ to manage'];
+    expect(waitingOnShells(['⏺ Started the build in the background.', '✻ Worked for 8s · done 11:48 PM · 1 shell still running', ...box])).toBe(true);
+    expect(waitingOnShells(['✻ Cooked for 34s · done 11:31 PM · 2 shells, 1 Artifact comment monitor still running', ...box])).toBe(true);
+    expect(waitingOnShells(['✻ Brewed for 24s · done 11:30 PM · 2', '  shells still running', ...box])).toBe(true);
+    expect(waitingOnShells(['✻ Worked for 8s · done 11:48 PM', ...box])).toBe(false);
+    expect(waitingOnShells(['✻ Worked for 7s · done 1:50 AM · 1 monitor still running', ...box])).toBe(false);
+    // 그 뒤에 답이 더 붙었으면 옛 줄이다
+    expect(waitingOnShells(['✻ Worked for 8s · done 11:48 PM · 1 shell still running', '❯ 고마워', '⏺ 네.', ...box])).toBe(false);
   });
 
   it('on a phone-width screen whose status line dropped the marker, sees work by the spinner or a changing screen', () => {

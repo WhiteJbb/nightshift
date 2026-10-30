@@ -188,6 +188,23 @@ export async function workDirs(session: string): Promise<{ pid: number; ppid: nu
   return procs.map(({ pid, ppid, shell }) => ({ pid, ppid, shell, dir: cwds.get(pid) ?? '' })).filter((p) => p.dir);
 }
 
+/** lsof -Fp("p<pid>" 줄)나 ss -p("pid=<pid>") 출력의 pid 들 */
+export const listenerPids = (out: string): number[] => [...out.matchAll(/(?:^p|pid=)(\d+)/gm)].map((m) => Number(m[1]));
+
+/**
+ * pane 아래에서 TCP 포트를 열고 기다리는 프로세스(개발 서버 등)가 있는지. 못 읽었으면 null.
+ * 에이전트가 턴을 끝내며 남긴 셸이 계속 떠 있을 서버인지, 끝나면 알려 올 작업(빌드·학습·폴링 등)인지 가른다
+ */
+export async function serving(pane: string): Promise<boolean | null> {
+  const [root, ps] = await Promise.all([run('tmux', ['display-message', '-p', '-t', pane, '#{pane_pid}']), run('ps', ['-A', '-o', 'pid=,ppid=,etime=,comm='])]);
+  if (root.code !== 0 || ps.code !== 0) return null;
+  const tree = new Set(descendants(ps.stdout, [Number(root.stdout.trim())]).map((p) => p.pid));
+  // lsof 는 찾은 게 없으면 1 로 끝난다. 실행하지 못했을 때만 모른다
+  const r = process.platform === 'linux' ? await run('ss', ['-ltnpH']) : await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp']);
+  if (r.code === null) return null;
+  return listenerPids(r.stdout).some((pid) => tree.has(pid));
+}
+
 /** SGR 만 남긴 줄들. 끝의 빈 줄을 버리고 최근 limit 줄만 남긴다. */
 export function cleanOutput(out: string, limit = OUTPUT_LINES): string[] {
   const lines = keepSgr(out)

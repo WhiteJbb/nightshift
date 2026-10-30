@@ -301,6 +301,39 @@ describe('Monitor', () => {
     expect(app().tmux.agent).toBe('ready');
   });
 
+  it('a turn that left a background job keeps the agent waiting until it picks up again, but a dev server is rest', async () => {
+    let now = T0;
+    const box = ['─────', '❯ ', '─────', '  ⏵⏵ auto mode on · 1 shell · ↓ to manage'];
+    const lines = ['⏺ Training runs in the background; I will check when it ends.', '✻ Worked for 9s · done 1:50 AM · 1 shell still running', ...box];
+    const state: { serving: boolean | null } = { serving: false };
+    const asked: string[] = [];
+    const collector = fakeCollector({ output: [], git: git() });
+    collector.tmux = async () => new Map([['app', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: new Date(T0 - 60_000).toISOString(), output: [], panes: [{ id: '%1', window: 0, windowName: 'w', index: 0, command: 'claude', active: true, cols: 140, lines }], waitingPrompt: null, attachCommand: 'x' }]]);
+    collector.serving = async (pane) => (asked.push(pane), state.serving);
+    const m = new Monitor({ config, collector, runs: noRuns, now: () => now });
+    const app = () => m.snapshot.projects[0]!;
+    // 포트를 열지 않은 셸(학습·빌드 등): 한 시간이 지나도 기다리는 중
+    for (let i = 0; i < 12; i++) {
+      await m.tick();
+      expect(app().tmux.agent).toBe('waiting');
+      expect(app().status.state).toBe('running');
+      now += 5 * 60_000;
+    }
+    expect(asked.at(-1)).toBe('%1');
+    // 포트를 열고 기다리는 셸(개발 서버)이나 프로세스를 못 읽으면 쉬는 중
+    for (const serving of [true, null]) {
+      state.serving = serving;
+      for (let i = 0; i < READY_TICKS; i++) {
+        now += 5000;
+        await m.tick();
+      }
+      expect(app().tmux.agent).toBe('ready');
+      expect(app().status.state).toBe('idle');
+      state.serving = false;
+      await m.tick();
+    }
+  });
+
   it('isolates a failing project and notifies subscribers', async () => {
     const m = new Monitor({ config, collector: fakeCollector({ output: [], git: git(), gitThrows: true }), runs: noRuns, now: () => T0 });
     const seen: Snapshot[] = [];
