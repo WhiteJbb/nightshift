@@ -937,9 +937,9 @@ test('on a touch screen, a held Backspace in the empty input keeps repeating: ke
   const input = screen.getByPlaceholderText(/입력 후 보내기/);
   // 비어 보여도 키보드가 지울 글자를 하나 둔다. 그 Backspace 는 막고 pane 으로 넘긴다
   act(() => input.focus());
-  expect(box().value).toBe('\u200b');
+  expect(box().value).toBe('\u2063');
   for (let i = 0; i < 6; i++) expect(fireEvent.keyDown(box(), { key: 'Backspace', keyCode: 8 })).toBe(false);
-  expect(box().value).toBe('\u200b');
+  expect(box().value).toBe('\u2063');
   await tick();
   expect(posts().map(([, b]) => [b.key, b.count])).toEqual([['BSpace', undefined]]);
   // 첫 응답이 오면 그사이 누른 다섯 번을 한 번에
@@ -950,17 +950,17 @@ test('on a touch screen, a held Backspace in the empty input keeps repeating: ke
   await tick();
   // 키를 못 읽는 키보드(keyCode 229)가 글자를 지워 버려도 pane 의 Backspace 로 보내고 다시 채운다
   fireEvent.change(box(), { target: { value: '' } });
-  expect(box().value).toBe('\u200b');
+  expect(box().value).toBe('\u2063');
   act(() => replies.shift()!());
   await tick();
   // 친 글은 숨은 글자 없이 보내고(붙여 넣은 같은 글자는 그대로), 입력칸을 떠나면 비워 안내 글이 보이게 한다
-  fireEvent.change(box(), { target: { value: '\u200b안\u200b녕' } });
+  fireEvent.change(box(), { target: { value: '\u2063안\u200b녕' } });
   fireEvent.click(screen.getByRole('button', { name: '보내기' }));
   act(() => replies.shift()!());
   await tick();
   // 커서를 맨 앞으로 옮겨 앞에 쳐도 넣어 둔 글자는 빠진다
-  fireEvent.change(box(), { target: { value: '\u200bls' } });
-  fireEvent.change(box(), { target: { value: 'sudo \u200bls' } });
+  fireEvent.change(box(), { target: { value: '\u2063ls' } });
+  fireEvent.change(box(), { target: { value: 'sudo \u2063ls' } });
   fireEvent.click(screen.getByRole('button', { name: '보내기' }));
   act(() => replies.shift()!());
   await tick();

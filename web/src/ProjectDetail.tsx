@@ -247,13 +247,14 @@ const FORWARD: Record<string, InputKey> = {
 const CTRL: Record<string, InputKey> = { c: 'C-c', d: 'C-d', u: 'C-u', l: 'C-l' };
 /**
  * 휴대폰 키보드는 빈 칸에서 Backspace 를 꾹 눌러도 되풀이하지 않는다(지울 글이 없으면 멈춘다). 입력칸이 비어 보이는 동안
- * 보이지 않는 글자 하나를 두어 계속 되풀이하게 하고, 그 Backspace 는 막아 pane 으로 넘긴다. 보낼 때는 뺀다
+ * 보이지 않는 글자 하나를 두어 계속 되풀이하게 하고, 그 Backspace 는 막아 pane 으로 넘긴다. 보낼 때는 뺀다.
+ * 붙여 넣은 글에 흔한 U+200B(폭 없는 공백) 대신 거의 쓰이지 않는 U+2063(보이지 않는 구분자)을 쓴다
  */
-const KEEP = '\u200b';
+const KEEP = '\u2063';
 /** 입력칸: value 는 칸에 보이는 그대로, kept 는 그 안에 넣어 둔 KEEP 이 아직 있는지 (커서를 옮겨 앞에 쳐도 따라간다) */
 type Field = { value: string; kept: boolean };
 const NO_TEXT: Field = { value: '', kept: false };
-/** 넣어 둔 KEEP 을 뺀 글. 같은 글자라 어느 것을 하나 빼도 결과가 같다 (사용자가 붙여 넣은 같은 글자는 남는다) */
+// ponytail: KEEP 의 자리는 기억하지 않고 하나를 뺀다. 사용자 글에 U+2063 이 섞여 있으면 다른 하나가 빠질 수 있다. 그런 글을 다루게 되면 자리를 따라간다
 const typed = (f: Field) => (f.kept ? f.value.replace(KEEP, '') : f.value);
 const keeps = (s: string) => s.split(KEEP).length - 1;
 /** 한 번에 묶어 보낼 수 있는 같은 키 수 (서버의 MAX_KEY_COUNT) */
