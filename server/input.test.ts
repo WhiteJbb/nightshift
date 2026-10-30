@@ -29,12 +29,14 @@ describe('parseInput', () => {
     expect(parseInput({ pane: '%3', text: '-rf; $(x)' })).toEqual({ pane: '%3', text: '-rf; $(x)', enter: false });
     expect(parseInput({ pane: '%3', key: 'C-c' })).toEqual({ pane: '%3', key: 'C-c' });
     expect(parseInput({ pane: '%3', key: 'PPage' })).toEqual({ pane: '%3', key: 'PPage' });
+    expect(parseInput({ pane: '%3', key: 'BSpace', count: 7 })).toEqual({ pane: '%3', key: 'BSpace', count: 7 });
+    expect(parseInput({ pane: '%3', key: 'BSpace', count: 1 })).toEqual({ pane: '%3', key: 'BSpace' });
     expect(parseInput({ pane: '%3', text: 'x', now: true })).toEqual({ pane: '%3', text: 'x', enter: false, now: true });
     expect(parseInput({ pane: '%3', text: 'x', now: 'yes' })).toEqual({ pane: '%3', text: 'x', enter: false });
   });
 
   it('rejects everything else', () => {
-    for (const body of [null, 'x', {}, { pane: 'agent:0.0', text: 'x' }, { pane: '%3' }, { pane: '%3', text: 'x', key: 'Enter' }, { pane: '%3', key: 'F1' }, { pane: '%3', key: 'Enter; kill-server' }, { pane: '%3', text: '' }, { pane: '%3', text: 5 }, { pane: '%3', text: 'a\0b' }, { pane: '%3', text: 'x'.repeat(20001) }]) {
+    for (const body of [null, 'x', {}, { pane: 'agent:0.0', text: 'x' }, { pane: '%3' }, { pane: '%3', text: 'x', key: 'Enter' }, { pane: '%3', key: 'F1' }, { pane: '%3', key: 'Enter; kill-server' }, { pane: '%3', text: '' }, { pane: '%3', text: 5 }, { pane: '%3', text: 'a\0b' }, { pane: '%3', text: 'x'.repeat(20001) }, { pane: '%3', key: 'BSpace', count: 0 }, { pane: '%3', key: 'BSpace', count: 101 }, { pane: '%3', key: 'BSpace', count: 1.5 }, { pane: '%3', key: 'BSpace', count: '3' }]) {
       expect(typeof parseInput(body)).toBe('string');
     }
   });
@@ -61,7 +63,8 @@ describe('sendInput', () => {
   it('sends a key, and text without Enter', async () => {
     await sendInput({ pane: '%3', key: 'BTab' });
     await sendInput({ pane: '%3', text: 'y', enter: false });
-    expect(mockRun.mock.calls.map((c) => c[1])).toEqual([['send-keys', '-t', '%3', 'BTab'], ['send-keys', '-t', '%3', '-l', '--', 'y']]);
+    await sendInput({ pane: '%3', key: 'BSpace', count: 3 });
+    expect(mockRun.mock.calls.map((c) => c[1])).toEqual([['send-keys', '-t', '%3', 'BTab'], ['send-keys', '-t', '%3', '-l', '--', 'y'], ['send-keys', '-t', '%3', 'BSpace', 'BSpace', 'BSpace']]);
   });
 
   it("escapes a trailing ';' which tmux would otherwise eat as a command separator", async () => {

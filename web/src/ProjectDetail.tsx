@@ -245,6 +245,13 @@ const FORWARD: Record<string, InputKey> = {
 };
 // 빈 입력칸에서 Ctrl 조합은 pane 으로 간다. 컴퓨터에선 키 버튼이 숨겨져 있어 이게 유일한 길이다
 const CTRL: Record<string, InputKey> = { c: 'C-c', d: 'C-d', u: 'C-u', l: 'C-l' };
+/**
+ * 휴대폰 키보드는 빈 칸에서 Backspace 를 꾹 눌러도 되풀이하지 않는다(지울 글이 없으면 멈춘다). 입력칸이 비어 보이는 동안
+ * 보이지 않는 글자 하나를 두어 계속 되풀이하게 하고, 그 Backspace 는 막아 pane 으로 넘긴다. 보낼 때는 뺀다
+ */
+const KEEP = '\u200b';
+/** 한 번에 묶어 보낼 수 있는 같은 키 수 (서버의 MAX_KEY_COUNT) */
+const MAX_KEY_COUNT = 100;
 
 /** pane: 입력을 보낼 pane. 고른 pane 이 사라졌으면 null 이고, 다시 고를 때까지 보내지 않는다 */
 /** 터미널 번호: 윈도우 번호, 윈도우가 나뉘어 있으면 pane 번호까지 (예: "1", "0.1") */
@@ -286,7 +293,9 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   // ponytail: 이름이 claude 인 pane 만 알아본다. npm 으로 깐 Claude Code 는 node 로 보여 "지금 보내기"가 없다
   const claude = target !== null && progName(target) === 'claude';
   const pane = target?.id ?? '';
-  const [text, setText] = useState('');
+  // raw: 입력칸 그대로 (휴대폰에선 KEEP 이 섞인다). 한글 조합 중에 값을 고치면 조합이 깨지므로 raw 는 그대로 두고 text 로 읽는다
+  const [raw, setRaw] = useState('');
+  const text = raw.replaceAll(KEEP, '');
   const [moreKeys, setMoreKeys] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +303,8 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
   const [uploading, setUploading] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** 비운 입력칸의 값: 휴대폰에서 입력칸을 쓰는 중이면 KEEP */
+  const empty = () => (!finePointer() && document.activeElement === inputRef.current ? KEEP : '');
 
   // 이미지는 서버에 파일로 저장하고 그 경로를 입력 칸에 넣는다. Claude Code·Codex 는 프롬프트 안의 이미지 경로를 첨부로 읽는다.
   const attach = (file: File | undefined) => {
@@ -306,7 +317,10 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
         .upload(projectId, { type: file.type, data: String(reader.result).split(',')[1] ?? '' })
         .then(
           ({ path }) => {
-            setText((cur) => `${cur.trimEnd()}${cur.trim() ? ' ' : ''}${path} `);
+            setRaw((cur) => {
+              const c = cur.replaceAll(KEEP, '');
+              return `${c.trimEnd()}${c.trim() ? ' ' : ''}${path} `;
+            });
             inputRef.current?.focus();
           },
           (e: unknown) => setError(errorMessage(e)),
@@ -333,27 +347,48 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
     attach(file);
   };
 
-  // 입력칸은 잠그지 않는다(포커스 유지). 보내는 중의 전송 시도만 무시한다
+  // 입력칸은 잠그지 않는다(포커스 유지). 보내는 중에 보낸 글은 무시하고(두 번 보내지 않게), 키는 모아 두었다가 이어서 보낸다:
+  // 꾹 누른 Backspace 는 응답보다 빨리 되풀이되므로 같은 키는 몇 번인지로 묶는다. 모아 둔 만큼만 보내니 떼면 곧 멈춘다
+  const sending = useRef(false);
+  const queued = useRef<InputRequest[]>([]);
   const send = (body: InputRequest) => {
     // 글을 보낸 뒤에는 이어서 칠 수 있게 입력 칸에 포커스를 둔다.
     // 키 버튼은 마우스 환경에서만 포커스를 되돌린다 (터치 화면에서 PgUp 을 누를 때마다 키보드가 뜨지 않게).
     if (body.text !== undefined || finePointer()) inputRef.current?.focus();
     // 보낼 pane 이 없거나, 이미지 경로가 아직 안 들어왔는데 프롬프트를 제출하려 하면 보내지 않는다
-    if (busy || !target || (uploading > 0 && (body.text !== undefined || body.key === 'Enter'))) return;
+    if (!target || (uploading > 0 && (body.text !== undefined || body.key === 'Enter'))) return;
+    if (sending.current) {
+      const last = queued.current.at(-1);
+      if (body.key === undefined) return;
+      if (last && last.key === body.key && last.pane === body.pane && (last.count ?? 1) < MAX_KEY_COUNT) last.count = (last.count ?? 1) + 1;
+      else queued.current.push({ ...body });
+      return;
+    }
+    sending.current = true;
     setBusy(true);
     const sent = body.text;
-    if (sent !== undefined) setText('');
+    if (sent !== undefined) setRaw(empty());
     api
       .sendInput(projectId, body)
       .then(
         () => setError(null),
         (e: unknown) => {
           setError(errorMessage(e));
+          queued.current = [];
           // 보내지 못한 글은 되돌려 놓는다. 그사이 새로 친 글이 있으면 그 앞에 붙여 둘 다 남긴다
-          if (sent !== undefined) setText((cur) => (cur === '' ? sent : `${sent}\n${cur}`));
+          if (sent !== undefined)
+            setRaw((cur) => {
+              const c = cur.replaceAll(KEEP, '');
+              return c === '' ? sent : `${sent}\n${c}`;
+            });
         },
       )
-      .finally(() => setBusy(false));
+      .finally(() => {
+        sending.current = false;
+        setBusy(false);
+        const next = queued.current.shift();
+        if (next) send(next);
+      });
   };
   const sendText = (enter: boolean) => {
     if (text !== '') send(enter ? { pane, text, enter: true } : { pane, text });
@@ -421,8 +456,14 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
           spellCheck={false}
           maxLength={20000}
           rows={Math.min(8, text.split('\n').length)}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          value={raw}
+          onChange={(e) => {
+            // 비어 보이는 칸에서 KEEP 이 지워졌으면(키를 읽지 못한 키보드) 그게 pane 의 Backspace 다
+            if (e.target.value === '' && raw === KEEP) send({ pane, key: 'BSpace' });
+            setRaw(e.target.value === '' ? empty() : e.target.value);
+          }}
+          onFocus={() => text === '' && setRaw(empty())}
+          onBlur={() => text === '' && setRaw('')}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onDrop={onDrop}
@@ -466,7 +507,7 @@ function InputBar({ projectId, pane: target, targetNo }: { projectId: string; pa
             className={[CAUTION.includes(key) ? 'caution' : '', PRIMARY_KEYS.includes(key) ? '' : 'extra'].join(' ').trim() || undefined}
             title={title}
             aria-label={title}
-            disabled={busy || !target || (key === 'Enter' && uploading > 0)}
+            disabled={!target || (key === 'Enter' && uploading > 0)}
             onClick={() => {
               // 중단·종료 키는 되돌릴 수 없다. 버튼은 손가락이 미끄러지기 쉬우니 한 번 묻는다 (키보드의 Ctrl+C 는 그대로)
               if (CAUTION.includes(key) && !window.confirm(`${label} 를 보낼까요? 실행 중인 프로그램이 중단될 수 있습니다.`)) return;

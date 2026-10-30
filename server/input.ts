@@ -8,17 +8,21 @@ import { sendKey, sendText } from './tmux.ts';
 export const INPUT_KEYS = ['Enter', 'Escape', 'Tab', 'BTab', 'Up', 'Down', 'Left', 'Right', 'PPage', 'NPage', 'BSpace', 'C-c', 'C-d', 'C-u', 'C-l'] as const satisfies readonly InputKey[];
 export const MAX_INPUT_CHARS = 20000;
 
-export type ParsedInput = { pane: string } & ({ text: string; enter: boolean; now?: true } | { key: InputKey });
+export type ParsedInput = { pane: string } & ({ text: string; enter: boolean; now?: true } | { key: InputKey; count?: number });
+/** 한 번에 연달아 누를 수 있는 키 수 */
+export const MAX_KEY_COUNT = 100;
 
 /** 신뢰할 수 없는 요청 본문을 검증한다. 문제가 있으면 오류 메시지(문자열). */
 export function parseInput(body: unknown): ParsedInput | string {
   if (typeof body !== 'object' || body === null) return '요청 본문이 필요합니다';
-  const { pane, text, enter, now, key } = body as Record<string, unknown>;
+  const { pane, text, enter, now, key, count } = body as Record<string, unknown>;
   if (typeof pane !== 'string' || !/^%\d+$/.test(pane)) return 'pane 이 올바르지 않습니다';
   if ((text === undefined) === (key === undefined)) return 'text 와 key 중 하나만 보내야 합니다';
   if (key !== undefined) {
     if (!(INPUT_KEYS as readonly unknown[]).includes(key)) return '허용되지 않은 키입니다';
-    return { pane, key: key as InputKey };
+    const n = count ?? 1;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_KEY_COUNT) return `count 는 1~${MAX_KEY_COUNT} 사이의 정수여야 합니다`;
+    return { pane, key: key as InputKey, ...(n > 1 && { count: n }) };
   }
   if (typeof text !== 'string' || text === '') return 'text 는 비어 있지 않은 문자열이어야 합니다';
   if (text.length > MAX_INPUT_CHARS) return `text 는 ${MAX_INPUT_CHARS}자 이하여야 합니다`;
@@ -31,7 +35,7 @@ export const ENTER_DELAY_MS = 200;
 
 /** 입력을 tmux 로 보낸다. 실패하면 오류 메시지. */
 export async function sendInput(input: ParsedInput): Promise<string | null> {
-  if ('key' in input) return sendKey(input.pane, input.key);
+  if ('key' in input) return sendKey(input.pane, ...Array<string>(input.count ?? 1).fill(input.key));
   const error = await sendText(input.pane, input.text);
   if (error || !(input.enter || input.now)) return error;
   await sleep(ENTER_DELAY_MS);
