@@ -110,6 +110,8 @@ interface Tracked {
   agent: boolean;
   /** 작업 중 표시가 연달아 보이지 않은 tick 수 (도구 호출 사이의 잠깐 빈 틈을 "끝남"으로 보지 않게) */
   quietTicks: number;
+  /** 에이전트 pane 마다의 quietTicks. 한 세션에 에이전트가 여럿이면 터미널마다 따로 끝남을 알린다 */
+  paneQuiet: Record<string, number>;
   /** 작업 중 표시를 마지막으로 본 시각. 스크롤·입력칸 타이핑도 화면을 바꾸지만 그건 일이 아니다 (대시보드 순서에 쓴다) */
   busyAt: string | null;
 }
@@ -455,6 +457,7 @@ export class Monitor {
     let waitingPrompt: string | null = null;
     let waitingChoices: TmuxInfo['waitingChoices'];
     let agent: TmuxInfo['agent'];
+    let panes = raw.panes;
     if (raw.exists) {
       // 어느 pane 이든 출력이 바뀌면 활동이다. pane 정보가 없으면 활성 pane 출력만 본다.
       const plain = raw.panes.length ? raw.panes.map((pane) => pane.lines.map(stripAnsi)) : [raw.output];
@@ -498,18 +501,22 @@ export class Monitor {
         const tailOf = (x: string, y: string) => x === y || x.endsWith(`\n${y}`);
         return a != null && b.body !== null && !tailOf(a, b.body) && !tailOf(b.body, a) && b.quiet === 0;
       };
-      const busy = plain.some((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
+      const paneBusy = plain.map((lines, i) => isBusy(lines, this.opts.config.busyPatterns, changedPane(ids[i]!)));
+      const busy = paneBusy.some(Boolean);
       // 셸만 남기고 턴을 끝냈으면 그 셸을 본다: 포트를 열고 기다리는 개발 서버면 쉬는 중이고, 아니면(빌드·학습·폴링 등)
       // 끝날 때 Claude Code 가 알려 받아 이어서 일하므로 기다리는 중이다. 프로세스를 못 읽으면 쉬는 중으로 둔다
-      const shellJob = async () => {
-        for (const [i, lines] of plain.entries()) if (raw.panes[i] && waitingOnShells(lines) && (await this.opts.collector.serving?.(raw.panes[i].id)) === false) return true;
-        return false;
-      };
-      const waiting = !busy && (plain.some(waitingOnBackground) || (await shellJob()));
+      const paneWaiting = await Promise.all(
+        plain.map(async (lines, i) => !paneBusy[i] && (waitingOnBackground(lines) || (raw.panes[i] !== undefined && waitingOnShells(lines) && (await this.opts.collector.serving?.(raw.panes[i].id)) === false))),
+      );
+      const waiting = !busy && paneWaiting.some(Boolean);
       // 작업 중 표시를 한 번 봤거나, pane 에서 Claude Code·Codex 가 돌고 있으면 에이전트 세션이다
-      if (busy || waiting || raw.panes.some((x) => /claude|codex/i.test(x.command))) tr.agent = true;
+      const isAgent = (i: number) => paneBusy[i] || paneWaiting[i] || /claude|codex/i.test(raw.panes[i]?.command ?? '');
+      if (plain.some((_, i) => isAgent(i))) tr.agent = true;
       tr.quietTicks = busy || waiting ? 0 : tr.quietTicks + 1;
       if (tr.agent) agent = waiting ? 'waiting' : tr.quietTicks >= READY_TICKS ? 'ready' : 'busy';
+      const before = tr.paneQuiet;
+      tr.paneQuiet = Object.fromEntries(ids.flatMap((id, i) => (raw.panes[i] && (before[id] !== undefined || isAgent(i)) ? [[id, paneBusy[i] || paneWaiting[i] ? 0 : (before[id] ?? READY_TICKS) + 1]] : [])));
+      panes = raw.panes.map((x, i) => (tr.paneQuiet[x.id] === undefined ? x : { ...x, agent: paneWaiting[i] ? 'waiting' : tr.paneQuiet[x.id]! >= READY_TICKS ? 'ready' : 'busy' }));
       if (tr.settle > 0) tr.settle -= 1;
       tr.output = text;
       tr.seen = seen;
@@ -522,6 +529,7 @@ export class Monitor {
     } else {
       tr.output = null;
       tr.seen = null;
+      tr.paneQuiet = {};
       tr.outputChangedAt = null;
       tr.busyAt = null;
     }
@@ -531,7 +539,7 @@ export class Monitor {
       git,
       since,
       lastGitChangeAt: latest(git.recentCommits[0]?.date ?? null, tr.gitChangedAt),
-      tmux: { ...raw, lastOutputChangeAt, waitingPrompt, ...(waitingChoices ? { waitingChoices } : {}), ...(agent ? { agent, lastBusyAt: tr.busyAt } : {}) },
+      tmux: { ...raw, panes, lastOutputChangeAt, waitingPrompt, ...(waitingChoices ? { waitingChoices } : {}), ...(agent ? { agent, lastBusyAt: tr.busyAt } : {}) },
       logErrors,
     };
   }
@@ -605,7 +613,7 @@ const tailRun = (r: RunResult | null): RunResult | null => {
   if (!r || (r.stdout.length <= SNAPSHOT_OUTPUT_CHARS && r.stderr.length <= SNAPSHOT_OUTPUT_CHARS)) return r;
   return { ...r, stdout: r.stdout.slice(-SNAPSHOT_OUTPUT_CHARS), stderr: r.stderr.slice(-SNAPSHOT_OUTPUT_CHARS), truncated: true };
 };
-const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, seen: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, busyAt: null });
+const newTracked = (repoPath: string): Tracked => ({ repoPath, baseline: null, fingerprint: null, gitChangedAt: null, logFile: null, logPos: null, logEnd: null, logErrors: [], output: null, seen: null, outputChangedAt: null, sizeKey: null, settle: 0, agent: false, quietTicks: READY_TICKS, paneQuiet: {}, busyAt: null });
 
 const EMPTY_GIT: GitInfo = {
   ok: false,

@@ -89,6 +89,8 @@ export interface TmuxPane {
   cwd?: string;
   /** pane 의 가로 칸 수. 터미널 영역보다 넓으면 가로 스크롤이 생긴다 */
   cols?: number;
+  /** 에이전트가 도는 pane 이면 그 pane 만의 상태 (TmuxInfo.agent 와 같은 뜻). 터미널마다 "작업 끝남"을 알리는 데 쓴다 */
+  agent?: 'busy' | 'ready' | 'waiting';
   /**
    * 최근 출력 (최대 100줄). 색상용 SGR 시퀀스(ESC [ ... m)만 남아 있고 다른 제어 문자는 제거됨.
    * SGR 상태는 줄을 넘어 이어진다.

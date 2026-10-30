@@ -53,9 +53,9 @@ const STATE_FORMAT =
 export class TermStreams {
   private clients = new Map<string, Client>();
 
-  /** 지금 이 세션의 터미널을 화면에 띄워 보고 있는 브라우저가 있는지 (숨은 탭은 스트림을 닫는다) */
-  watching(session: string): boolean {
-    return (this.clients.get(session)?.subs.size ?? 0) > 0;
+  /** 지금 이 세션의 터미널(pane 을 주면 그 터미널)을 화면에 띄워 보고 있는 브라우저가 있는지 (숨은 탭은 스트림을 닫는다) */
+  watching(session: string, pane?: string): boolean {
+    return [...(this.clients.get(session)?.subs ?? [])].some((s) => pane === undefined || s.pane === pane);
   }
 
   /**
