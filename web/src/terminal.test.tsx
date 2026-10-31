@@ -467,16 +467,18 @@ async function press(ms: number, dx = 0) {
   fireEvent.touchEnd(host, { touches: [] });
 }
 
-test('a long press shows the terminal as plain text (wrapped rows joined, trailing blanks dropped) while the stream stays open; 터미널로 goes back', async () => {
+test('a long press shows the terminal as plain text (only the visible columns, wrapped rows joined, trailing blanks dropped) while the stream stays open; 터미널로 goes back', async () => {
   await renderTab(project(ONE));
   await init();
-  // 꺾인 줄 끝의 진짜 빈칸은 남기고, 한글이 안 들어가 비워 둔 칸('' 인 칸 뒤에 두 칸 글자)만 뺀다
-  const rows: [string, boolean][] = [['abc  ', false], ['def', true], ['second   ', false], ['abcd\0', false], ['한글', true], ['wxyz\0', false], ['F', true], ['', false]];
+  // 꺾인 줄 끝의 진짜 빈칸은 남기고, 한글이 안 들어가 비워 둔 칸('' 인 칸 뒤에 두 칸 글자)만 뺀다.
+  // 폭이 6칸으로 줄었지만 줄에는 예전 폭의 글(OLD)이 칸 밖에 남아 있다 (대체 화면은 xterm 이 줄을 자르지 않는다)
+  xterm().cols = 6;
+  const rows: [string, boolean][] = [['abc   OLD', false], ['def   OLD', true], ['secondOLD', false], ['abcde\0OLD', false], ['한글', true], ['wxyz \0OLD', false], ['F', true], ['', false]];
   const getLine = (i: number) => {
     const r = rows[i];
     const text = r?.[0] ?? '';
     const cell = (c: number) => ({ getWidth: () => (/[가-힣]/.test(text[c] ?? '') ? 2 : 1), getChars: () => (text[c] === '\0' ? '' : (text[c] ?? '')) });
-    const str = (trim: boolean, start = 0, end = text.length) => text.slice(start, end).replace('\0', ' ')[trim ? 'trimEnd' : 'toString']();
+    const str = (_trim: boolean, start = 0, end = text.length) => text.slice(start, end).replaceAll('\0', ' ');
     return r && { isWrapped: r[1], length: text.length, getCell: cell, translateToString: str };
   };
   xterm().buffer = { active: { type: 'normal', length: rows.length, getLine } } as never;
@@ -485,7 +487,7 @@ test('a long press shows the terminal as plain text (wrapped rows joined, traili
   await press(600, 20);
   expect(screen.queryByLabelText(/터미널 글/)).toBeNull();
   await press(600);
-  expect(screen.getByLabelText(/터미널 글/).textContent).toBe('abc  def\nsecond\nabcd한글\nwxyz F');
+  expect(screen.getByLabelText(/터미널 글/).textContent).toBe('abc   def\nsecond\nabcde한글\nwxyz  F');
   fireEvent.click(screen.getByRole('button', { name: '터미널로' }));
   expect(screen.queryByLabelText(/터미널 글/)).toBeNull();
   expect(FakeTerminal.all).toHaveLength(1);

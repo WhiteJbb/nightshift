@@ -70,6 +70,8 @@ const isApple = () => /^(Mac|iPhone|iPad|iPod)/.test(navigator.platform);
 /** 터미널에 있는 글 (일반 화면이면 스크롤백까지). 폭이 넘쳐 꺾인 줄은 다시 한 줄로 잇는다 */
 export function bufferText(term: Terminal): string {
   const b = term.buffer.active;
+  // 보이는 칸까지만 읽는다. 대체 화면(Claude Code)은 폭이 줄어도 xterm 이 줄 끝을 자르지 않아, 칸 밖에 예전 폭의 글이 안 보이게 남는다
+  const cols = term.cols;
   const lines: string[] = [];
   for (let i = 0; i < b.length; i++) {
     const line = b.getLine(i);
@@ -77,11 +79,11 @@ export function bufferText(term: Terminal): string {
     // 다음 줄로 이어지는 줄 끝의 빈칸은 글의 일부다. 다만 두 칸 글자(한글)가 안 들어가 비워 둔 마지막 칸은 아니다
     const next = b.getLine(i + 1);
     const joins = next?.isWrapped === true;
-    const last = line.getCell(line.length - 1);
+    const last = line.getCell(cols - 1);
     const pad = joins && last?.getWidth() === 1 && last.getChars() === '' && next.getCell(0)?.getWidth() === 2;
-    const s = line.translateToString(!joins, 0, pad ? line.length - 1 : undefined);
-    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += s;
-    else lines.push(s);
+    const s = line.translateToString(false, 0, pad ? cols - 1 : cols);
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += joins ? s : s.trimEnd();
+    else lines.push(joins ? s : s.trimEnd());
   }
   return lines.join('\n').trimEnd();
 }
