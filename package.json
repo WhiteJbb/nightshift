@@ -20,7 +20,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
