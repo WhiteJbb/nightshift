@@ -481,6 +481,15 @@ tailscale serve --bg --https=443 http://127.0.0.1:4477   # https://<기기>.<tai
 - 실행 중에는 **취소** 버튼으로 중단할 수 있고(프로세스 그룹째 종료), 종류별 최근 20건의 실행 이력이 표로 남습니다.
 - "모니터링 시작"은 현재 세션을 시작한 시점입니다. 서버를 재시작해도 유지되고, "모니터링 새로 시작" 또는 `--fresh`로 초기화됩니다.
 
+## 개발
+
+```bash
+npm test             # Vitest 테스트 실행 (vitest run)
+npm run typecheck    # 출력 파일 없이 TypeScript 타입 검사 (tsc --noEmit)
+npm run lint         # ESLint로 코드 검사 (eslint .)
+npm run build        # 타입 검사 후 Vite 프로덕션 빌드 (tsc --noEmit && vite build)
+```
+
 ## NightShift 자체의 테스트·빌드
 
 ```bash
