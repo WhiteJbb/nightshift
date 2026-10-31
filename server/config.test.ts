@@ -1,6 +1,20 @@
 import { homedir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, DEFAULTS, loadConfig, parseConfig } from './config.ts';
+import { ConfigError, DEFAULTS, loadConfig, parseConfig, slugify } from './config.ts';
+
+describe('slugify', () => {
+  it('preserves composed Hangul names', () => {
+    expect(slugify('한글 프로젝트')).toBe('한글-프로젝트');
+  });
+
+  it('collapses internal runs of spaces and symbols to one hyphen', () => {
+    expect(slugify('Night   Shift!!! Dashboard')).toBe('night-shift-dashboard');
+  });
+
+  it('removes leading and trailing symbols', () => {
+    expect(slugify('---Night Shift!!!')).toBe('night-shift');
+  });
+});
 
 describe('parseConfig', () => {
   it('fills defaults', () => {
