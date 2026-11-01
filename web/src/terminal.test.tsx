@@ -774,6 +774,15 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   expect(split().style.gridTemplateColumns).toBe('minmax(0, 1.25fr) 6px minmax(0, 0.75fr) 6px minmax(0, 1fr)');
   fireEvent.doubleClick(border());
   expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, 1fr)');
+  // 세션을 다시 띄우면 pane id 가 다시 쓰이므로 숨김·차례는 버린다 (열 수·몫은 남긴다)
+  fireEvent.click(show('0.1'));
+  fireEvent.click(screen.getByRole('button', { name: '터미널 0.2 앞으로' }));
+  expect(heads()).toEqual(['0.2', '0.0']);
+  cleanup();
+  const again = project(THREE);
+  await renderTab({ ...again, tmux: { ...again.tmux, createdAt: '2026-01-02T00:00:00.000Z' } });
+  expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '나란히 보기 열 수' }).value).toBe('3');
 });
 
 test('the stream is closed and the terminal disposed on unmount', async () => {

@@ -839,10 +839,11 @@ const splitCols = (n: number) => (n <= 2 ? n : n <= 4 ? 2 : 3);
 const SPLIT_COLS = [0, 1, 2, 3, 4];
 /**
  * 나란히 보기의 배치. 프로젝트마다 이 브라우저에 기억한다. hidden: 띄우지 않는 터미널, order: 칸 차례(없는 것은 tmux 차례로 뒤에),
- * cols: 열 수(0 은 터미널 수에 따라), colFr·rowFr: 열·줄의 몫 (개수가 안 맞으면 똑같이 나눈다)
+ * cols: 열 수(0 은 터미널 수에 따라), colFr·rowFr: 열·줄의 몫 (개수가 안 맞으면 똑같이 나눈다).
+ * session: hidden·order 를 쓴 때의 세션 생성 시각. pane id 는 tmux 를 다시 띄우면 다시 쓰이므로, 세션이 바뀌었으면 둘은 버린다
  */
-type SplitLayout = { hidden: string[]; order: string[]; cols: number; colFr: number[]; rowFr: number[] };
-const NO_LAYOUT: SplitLayout = { hidden: [], order: [], cols: 0, colFr: [], rowFr: [] };
+type SplitLayout = { hidden: string[]; order: string[]; cols: number; colFr: number[]; rowFr: number[]; session: string | null };
+const NO_LAYOUT: SplitLayout = { hidden: [], order: [], cols: 0, colFr: [], rowFr: [], session: null };
 /** 기억한 배치. 저장소를 못 쓰거나 내용이 깨졌으면 기본 배치 */
 function readLayout(key: string): SplitLayout {
   try {
@@ -850,7 +851,7 @@ function readLayout(key: string): SplitLayout {
     if (!v || typeof v !== 'object') return NO_LAYOUT;
     const ids = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []);
     const frs = (a: unknown) => (Array.isArray(a) && a.every((x) => typeof x === 'number' && x > 0 && Number.isFinite(x)) ? (a as number[]) : []);
-    return { hidden: ids(v.hidden), order: ids(v.order), cols: SPLIT_COLS.includes(v.cols as number) ? (v.cols as number) : 0, colFr: frs(v.colFr), rowFr: frs(v.rowFr) };
+    return { hidden: ids(v.hidden), order: ids(v.order), cols: SPLIT_COLS.includes(v.cols as number) ? (v.cols as number) : 0, colFr: frs(v.colFr), rowFr: frs(v.rowFr), session: typeof v.session === 'string' ? v.session : null };
   } catch {
     return NO_LAYOUT;
   }
@@ -944,14 +945,15 @@ export function TerminalTab({ project: p, now }: Props) {
   });
   const splitOn = split && t.panes.length > 1;
   const layoutKey = `splitLayout:${p.id}`;
-  const [layout, setLayoutState] = useState(() => readLayout(layoutKey));
+  const [saved, setLayoutState] = useState(() => readLayout(layoutKey));
+  const layout = saved.session === t.createdAt ? saved : { ...saved, hidden: [], order: [] };
   const setLayout = (next: SplitLayout) => {
-    // 닫힌 터미널은 지운다 (tmux 를 다시 띄워 같은 id 가 새 터미널에 붙으면 숨겨진 채로 나온다)
+    // 닫힌 터미널은 지운다
     const open = (ids: string[]) => ids.filter((id) => t.panes.some((x) => x.id === id));
-    const saved = { ...next, hidden: open(next.hidden), order: open(next.order) };
-    setLayoutState(saved);
+    const kept = { ...next, hidden: open(next.hidden), order: open(next.order), session: t.createdAt };
+    setLayoutState(kept);
     try {
-      localStorage.setItem(layoutKey, JSON.stringify(saved));
+      localStorage.setItem(layoutKey, JSON.stringify(kept));
     } catch {
       // 기억하지 못해도 지금 화면은 바뀐다
     }
@@ -961,8 +963,8 @@ export function TerminalTab({ project: p, now }: Props) {
     return i < 0 ? layout.order.length : i;
   };
   const ordered = [...t.panes].sort((a, b) => rank(a) - rank(b));
-  // 숨긴 것이 지금 터미널 전부면(같은 id 가 다시 쓰였다) 모두 띄운다
   const hiddenNow = layout.hidden.filter((id) => t.panes.some((x) => x.id === id));
+  // 하나는 띄운다
   const hidden = hiddenNow.length < t.panes.length ? hiddenNow : [];
   const cells = ordered.filter((x) => !hidden.includes(x.id));
   const cellIds = cells.map((x) => x.id).join(',');
