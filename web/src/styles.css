@@ -1440,6 +1440,12 @@ pre {
   width: max-content;
   min-width: 100%;
 }
+/* 크기는 새 터미널 메뉴(.panes button)와 같게 */
+.split-cols .menu button {
+  font-size: var(--fs-sm);
+  padding: 3px 12px;
+  min-height: 26px;
+}
 .term-bar .menu-wrap .menu button[aria-checked='true'] {
   color: #fff;
   background: rgba(255, 255, 255, 0.16);
@@ -1498,9 +1504,6 @@ pre {
 }
 .term-bar .menu-wrap .menu button {
   justify-content: flex-start;
-  font-size: var(--fs-sm);
-  padding: 3px 12px;
-  min-height: 26px;
   background: transparent;
 }
 .term-bar .menu-wrap .menu button:hover:not(:disabled) {
@@ -2149,6 +2152,7 @@ fieldset.checks legend {
   }
   .keys button,
   .panes button,
+  .split-cols .menu button,
   .card .choices button,
   .meta button,
   .with-action button,

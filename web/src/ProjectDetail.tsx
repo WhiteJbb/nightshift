@@ -919,6 +919,7 @@ export function TerminalTab({ project: p, now }: Props) {
   // 나란히 보기 열 수 메뉴
   const [colsOpen, setColsOpen] = useState(false);
   const colsRef = useRef<HTMLSpanElement>(null);
+  const colsButton = useRef<HTMLButtonElement>(null);
   useDismiss(colsRef, colsOpen, () => setColsOpen(false));
   const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => {
@@ -1260,11 +1261,12 @@ export function TerminalTab({ project: p, now }: Props) {
               )}
               {splitOn && (
                 <span className="menu-wrap split-cols" ref={colsRef}>
-                  <button type="button" className="more-rows" aria-haspopup="menu" aria-expanded={colsOpen} title="나란히 보기 열 수" onClick={() => setColsOpen(!colsOpen)}>
+                  <button ref={colsButton} type="button" className="more-rows" aria-haspopup="menu" aria-expanded={colsOpen} title="나란히 보기 열 수" onClick={() => setColsOpen(!colsOpen)}>
                     {colsLabel(layout.cols)} ▾
                   </button>
                   {colsOpen && (
-                    <span className="menu" role="menu">
+                    // 고르거나 Esc 로 닫아도 키보드 자리가 버튼에 남게 (메뉴가 사라지며 초점을 잃지 않게)
+                    <span className="menu" role="menu" onKeyDown={(e) => e.key === 'Escape' && colsButton.current?.focus()}>
                       {SPLIT_COLS.map((n) => (
                         <button
                           key={n}
@@ -1274,6 +1276,7 @@ export function TerminalTab({ project: p, now }: Props) {
                           onClick={() => {
                             setLayout({ ...layout, cols: n });
                             setColsOpen(false);
+                            colsButton.current?.focus();
                           }}
                         >
                           {colsLabel(n)}

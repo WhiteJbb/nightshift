@@ -764,6 +764,7 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   fireEvent.click(screen.getByRole('button', { name: '열 자동 ▾' }));
   fireEvent.click(screen.getByRole('menuitemradio', { name: '3열' }));
   expect(screen.queryByRole('menu')).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '3열 ▾' })); // 키보드 자리는 버튼에 남는다
   expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, 1fr)');
   Object.defineProperty(split(), 'clientWidth', { configurable: true, value: 972 });
   const border = () => screen.getByRole('separator', { name: '1열과 2열 사이 폭 조절' });
