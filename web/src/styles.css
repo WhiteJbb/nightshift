@@ -1372,12 +1372,19 @@ pre {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 높이는 고정: 터미널 높이를 나눌 때 이만큼 뺀다 (ProjectDetail.tsx 의 SPLIT_HEAD) */
+  box-sizing: border-box;
+  height: 26px;
   padding: 6px 12px 0;
   font-size: var(--fs-sm);
   color: rgba(255, 255, 255, 0.7);
 }
 .split-head .conn {
   margin-left: auto;
+}
+.split-head .more-rows {
+  min-height: 0;
+  padding-block: 0;
 }
 /* 머리를 끌어 다른 칸에 놓으면 자리를 바꾼다. 놓을 칸은 테두리로 */
 .split-head[draggable='true'] {

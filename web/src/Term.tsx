@@ -170,7 +170,10 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       if (!width) return;
       const perPx = charWidth(`${TERM_FONT_SIZE}px ${TERM_FONT}`) / TERM_FONT_SIZE;
       const byWidth = Math.floor(width / (term.cols * perPx));
-      const byHeight = Math.floor(termHeight(fullRef.current, layout.current.heightShare) / (term.rows * ROW_RATIO));
+      // 높이에서는 감싼 틀(.term-view)의 위아래 여백을 뺀다 (fitSize 와 같게. 안 빼면 그만큼 아래로 넘친다)
+      const view = el.parentElement ? getComputedStyle(el.parentElement) : null;
+      const padY = view ? (parseFloat(view.paddingTop) || 0) + (parseFloat(view.paddingBottom) || 0) : 0;
+      const byHeight = Math.floor((termHeight(fullRef.current, layout.current.heightShare) - padY) / (term.rows * ROW_RATIO));
       const [min, max] = fontRange();
       term.options.fontSize = Math.max(min, Math.min(max, byWidth, byHeight));
     };
