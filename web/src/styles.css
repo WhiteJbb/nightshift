@@ -1467,7 +1467,7 @@ pre {
   }
   /* 한 줄로 쌓이니 열 수·경계·자리 바꾸기는 쓸 데가 없다 */
   .split-gutter,
-  .split-cols,
+  .term-bar .split-cols,
   .split-head .move {
     display: none;
   }
