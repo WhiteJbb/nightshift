@@ -1,10 +1,10 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
+import type { ClipboardEvent, CSSProperties, DragEvent, KeyboardEvent, PointerEvent } from 'react';
 import type { AgentKind, Commit, FileStat, InputKey, InputRequest, ProjectSnapshot, ProjectState, RunKind, RunResult, RunSummary, TermEvent, TmuxPane } from '../../shared/types.ts';
 import { NOT_A_REPO } from '../../shared/types.ts';
 import { AGENTS, StartSession } from './NewSession.tsx';
 import { FilesTab, useDismiss } from './Files.tsx';
-import { charWidth, fitSize, fontRange } from './termsize.ts';
+import { charWidth, fitSize, fontRange, termHeight } from './termsize.ts';
 import { useFitToView } from './fitview.ts';
 import { parseAnsi } from './ansi.ts';
 import { copyText, Term, TERM_FONT, TERM_FONT_SIZE } from './Term.tsx';
@@ -696,22 +696,57 @@ const quietFit = (e: unknown, show: (msg: string) => void) => {
   if (!(e instanceof ApiError && e.status === 403)) show(errorMessage(e));
 };
 
-/** 나란히 보기의 한 칸: 터미널 하나와 그 이름·연결 상태. 누르거나 키보드로 들어오면 입력 대상이 된다 */
-function SplitCell({ project: p, pane: x, no, selected, cols, share, span, full, canFit, feed, onSelect, onReconnect, onNotice }: { project: ProjectSnapshot; pane: TmuxPane; no: string; selected: boolean; cols: number; share: number; span: number; full: boolean; canFit: boolean; feed: TermFeed; onSelect: () => void; onReconnect: () => void; onNotice: (msg: string) => void }) {
+/** 칸 머리를 끌 때 싣는 pane id 의 종류 (파일 끌어 놓기와 섞이지 않게) */
+const DRAG_TYPE = 'application/x-nightshift-pane';
+
+/**
+ * 나란히 보기의 한 칸: 터미널 하나와 그 이름·연결 상태. 누르거나 키보드로 들어오면 입력 대상이 된다.
+ * 머리를 끌어 다른 칸에 놓거나 ←·→ 로 옆 칸과 자리를 바꾼다(onSwap: 이 칸과 바꿀 pane). place: 격자 자리, width·share: 폭·높이의 몫
+ */
+function SplitCell({ project: p, pane: x, no, selected, place, width, share, full, canFit, feed, prev, next, onSelect, onSwap, onReconnect, onNotice }: { project: ProjectSnapshot; pane: TmuxPane; no: string; selected: boolean; place: CSSProperties; width: number; share: number; full: boolean; canFit: boolean; feed: TermFeed; prev: string | null; next: string | null; onSelect: () => void; onSwap: (other: string) => void; onReconnect: () => void; onNotice: (msg: string) => void }) {
   const viewRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TermStatus>('connecting');
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [fitError, setFitError] = useState<string | null>(null);
-  // 붙어 있는 터미널이 없으면 이 칸 크기에 맞춘다. 칸 배치(전체 화면, 칸 수에 따른 높이·폭)나 창 크기가 바뀌면 다시
-  useFitToView(canFit, size, `${x.id}:${full}:${cols}:${share}:${span}`, () => fitSize(viewRef.current, full, share), (want) => void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError)));
+  const [over, setOver] = useState(false);
+  // 붙어 있는 터미널이 없으면 이 칸 크기에 맞춘다. 칸 배치(전체 화면, 폭·높이의 몫)나 창 크기가 바뀌면 다시
+  useFitToView(canFit, size, `${x.id}:${full}:${width}:${share}`, () => fitSize(viewRef.current, full, share), (want) => void api.fitPane(p.id, x.id, want).catch((e: unknown) => quietFit(e, setFitError)));
   const live = status === 'live';
+  const dragged = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(DRAG_TYPE);
   return (
-    <div className={selected ? 'split-cell selected' : 'split-cell'} style={span > 1 ? { gridColumn: `span ${span}` } : undefined} onPointerDown={onSelect} onFocusCapture={(e) => {
+    <div
+      className={['split-cell', selected && 'selected', over && 'drop'].filter(Boolean).join(' ')}
+      style={place}
+      onPointerDown={onSelect}
+      onFocusCapture={(e) => {
         // 키보드로 터미널에 들어올 때만 고른다 (칸의 버튼으로 Tab 하면 그 버튼에 포커스를 둔다)
         if (viewRef.current?.contains(e.target as Node)) onSelect();
       }}
+      onDragOver={(e) => {
+        if (!dragged(e)) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(e) => {
+        setOver(false);
+        const from = e.dataTransfer.getData(DRAG_TYPE);
+        if (!from) return;
+        e.preventDefault();
+        if (from !== x.id) onSwap(from);
+      }}
     >
-      <div className="split-head">
+      <div
+        className="split-head"
+        draggable
+        title="끌어서 다른 칸에 놓으면 자리를 바꿉니다"
+        onDragStart={(e) => {
+          e.dataTransfer.setData(DRAG_TYPE, x.id);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+      >
         <span className="dim mono">{no}</span>
         <span className="mono">{progName(x)}</span>
         {fitError && <span className="err">{fitError}</span>}
@@ -723,6 +758,16 @@ function SplitCell({ project: p, pane: x, no, selected, cols, share, span, full,
             다시 연결
           </button>
         )}
+        {(prev || next) && (
+          <>
+            <button type="button" className="move" aria-label={`터미널 ${no} 앞으로`} title="앞 칸과 자리 바꾸기" disabled={!prev} onClick={() => prev && onSwap(prev)}>
+              ←
+            </button>
+            <button type="button" className="move" aria-label={`터미널 ${no} 뒤로`} title="뒤 칸과 자리 바꾸기" disabled={!next} onClick={() => next && onSwap(next)}>
+              →
+            </button>
+          </>
+        )}
       </div>
       <div ref={viewRef} className="term-view">
         <Term projectId={p.id} pane={x.id} canInput={p.allowInput} command={x.command} full={full} focus={selected} heightShare={share} feed={feed} onNotice={onNotice} onStatus={setStatus} onSize={(cols, rows) => setSize({ cols, rows })} />
@@ -731,10 +776,92 @@ function SplitCell({ project: p, pane: x, no, selected, cols, share, span, full,
   );
 }
 
+/** 나란히 보기의 칸 사이 경계 두께(px). 끄는 손잡이가 된다 */
+const GUTTER = 6;
+/** 경계를 끌어도 지키는 칸의 최소 폭·높이(px) */
+const MIN_CELL_WIDTH = 240;
+const MIN_CELL_HEIGHT = 120;
+/** 경계를 화살표 키로 옮기는 한 번의 거리(px) */
+const GUTTER_STEP = 40;
+
+/**
+ * 나란히 보기의 칸 사이 경계. 끌거나(놓을 때 정한다) 화살표 키로 옮기면 onMove(옮긴 px), 두 번 누르면 똑같이 나눈다(onReset).
+ * dir: col 은 두 열 사이(좌우로 옮김), row 는 두 줄 사이(위아래로 옮김)
+ */
+function Gutter({ dir, place, label, onMove, onReset }: { dir: 'col' | 'row'; place: CSSProperties; label: string; onMove: (px: number) => void; onReset: () => void }) {
+  const [drag, setDrag] = useState<{ id: number; from: number; at: number } | null>(null);
+  const at = (e: PointerEvent) => (dir === 'col' ? e.clientX : e.clientY);
+  const moved = drag ? drag.at - drag.from : 0;
+  const keys: Record<string, number> = dir === 'col' ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
+  return (
+    <div
+      role="separator"
+      aria-orientation={dir === 'col' ? 'vertical' : 'horizontal'}
+      aria-label={label}
+      tabIndex={0}
+      title="끌어서 크기 조절, 두 번 누르면 똑같이"
+      className={drag ? `split-gutter ${dir} dragging` : `split-gutter ${dir}`}
+      style={{ ...place, transform: moved ? (dir === 'col' ? `translateX(${moved}px)` : `translateY(${moved}px)`) : undefined }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        setDrag({ id: e.pointerId, from: at(e), at: at(e) });
+      }}
+      onPointerMove={(e) => {
+        if (drag?.id === e.pointerId) setDrag({ ...drag, at: at(e) });
+      }}
+      onPointerUp={(e) => {
+        if (drag?.id !== e.pointerId) return;
+        setDrag(null);
+        if (moved) onMove(moved);
+      }}
+      onPointerCancel={() => setDrag(null)}
+      onDoubleClick={onReset}
+      onKeyDown={(e) => {
+        const step = keys[e.key];
+        if (!step) return;
+        e.preventDefault();
+        onMove(step * GUTTER_STEP);
+      }}
+    />
+  );
+}
+
 /** 새 터미널 메뉴 폭(px). styles.css 의 .new-term .menu 와 같다 */
 const MENU_WIDTH = 150;
 /** 나란히 보기의 열 수: 둘이면 2열, 넷까지 2×2, 그보다 많으면 3열 */
 const splitCols = (n: number) => (n <= 2 ? n : n <= 4 ? 2 : 3);
+/** 고를 수 있는 열 수 (0 은 저절로) */
+const SPLIT_COLS = [0, 1, 2, 3, 4];
+/**
+ * 나란히 보기의 배치. 프로젝트마다 이 브라우저에 기억한다. hidden: 띄우지 않는 터미널, order: 칸 차례(없는 것은 tmux 차례로 뒤에),
+ * cols: 열 수(0 은 터미널 수에 따라), colFr·rowFr: 열·줄의 몫 (개수가 안 맞으면 똑같이 나눈다)
+ */
+type SplitLayout = { hidden: string[]; order: string[]; cols: number; colFr: number[]; rowFr: number[] };
+const NO_LAYOUT: SplitLayout = { hidden: [], order: [], cols: 0, colFr: [], rowFr: [] };
+/** 기억한 배치. 저장소를 못 쓰거나 내용이 깨졌으면 기본 배치 */
+function readLayout(key: string): SplitLayout {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Record<string, unknown> | null;
+    if (!v || typeof v !== 'object') return NO_LAYOUT;
+    const ids = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []);
+    const frs = (a: unknown) => (Array.isArray(a) && a.every((x) => typeof x === 'number' && x > 0 && Number.isFinite(x)) ? (a as number[]) : []);
+    return { hidden: ids(v.hidden), order: ids(v.order), cols: SPLIT_COLS.includes(v.cols as number) ? (v.cols as number) : 0, colFr: frs(v.colFr), rowFr: frs(v.rowFr) };
+  } catch {
+    return NO_LAYOUT;
+  }
+}
+/** 몫이 n 개면 그대로, 아니면 똑같이 */
+const shares = (fr: number[], n: number) => (fr.length === n ? fr : Array<number>(n).fill(1));
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+/** i 와 i+1 사이 경계를 px 만큼 옮긴 몫. total: 몫 전체의 px, min: 한 칸이 지키는 최소 px (둘이 다 못 지키면 반씩) */
+export function moveBoundary(fr: number[], i: number, px: number, total: number, min: number): number[] {
+  const unit = sum(fr) / total;
+  const pair = fr[i]! + fr[i + 1]!;
+  const lo = Math.min(pair / 2, min * unit);
+  const a = Math.max(lo, Math.min(pair - lo, fr[i]! + px * unit));
+  return fr.map((f, j) => (j === i ? a : j === i + 1 ? pair - a : f));
+}
 
 export function TerminalTab({ project: p, now }: Props) {
   const t = p.tmux;
@@ -812,7 +939,48 @@ export function TerminalTab({ project: p, now }: Props) {
     }
   });
   const splitOn = split && t.panes.length > 1;
-  const grid = { cols: splitCols(t.panes.length), rows: Math.ceil(t.panes.length / splitCols(t.panes.length)) };
+  const layoutKey = `splitLayout:${p.id}`;
+  const [layout, setLayoutState] = useState(() => readLayout(layoutKey));
+  const setLayout = (next: SplitLayout) => {
+    // 닫힌 터미널은 지운다 (tmux 를 다시 띄워 같은 id 가 새 터미널에 붙으면 숨겨진 채로 나온다)
+    const open = (ids: string[]) => ids.filter((id) => t.panes.some((x) => x.id === id));
+    const saved = { ...next, hidden: open(next.hidden), order: open(next.order) };
+    setLayoutState(saved);
+    try {
+      localStorage.setItem(layoutKey, JSON.stringify(saved));
+    } catch {
+      // 기억하지 못해도 지금 화면은 바뀐다
+    }
+  };
+  const rank = (x: TmuxPane) => {
+    const i = layout.order.indexOf(x.id);
+    return i < 0 ? layout.order.length : i;
+  };
+  const ordered = [...t.panes].sort((a, b) => rank(a) - rank(b));
+  // 숨긴 것이 지금 터미널 전부면(같은 id 가 다시 쓰였다) 모두 띄운다
+  const hiddenNow = layout.hidden.filter((id) => t.panes.some((x) => x.id === id));
+  const hidden = hiddenNow.length < t.panes.length ? hiddenNow : [];
+  const cells = ordered.filter((x) => !hidden.includes(x.id));
+  const cellIds = cells.map((x) => x.id).join(',');
+  const gridCols = Math.max(1, Math.min(layout.cols || splitCols(cells.length), cells.length));
+  const gridRows = Math.ceil(cells.length / gridCols);
+  const grid = { cols: gridCols, rows: gridRows, colFr: shares(layout.colFr, gridCols), rowFr: shares(layout.rowFr, gridRows) };
+  const splitRef = useRef<HTMLDivElement>(null);
+  const toggleShown = (x: TmuxPane) => setLayout({ ...layout, hidden: hidden.includes(x.id) ? hidden.filter((id) => id !== x.id) : [...hidden, x.id] });
+  const swap = (a: string, b: string) => {
+    const ids = ordered.map((x) => x.id);
+    const i = ids.indexOf(a);
+    const j = ids.indexOf(b);
+    if (i < 0 || j < 0) return;
+    ids[i] = b;
+    ids[j] = a;
+    setLayout({ ...layout, order: ids });
+  };
+  // 경계를 옮긴다: 열은 격자 폭(경계 두께를 뺀다), 줄은 터미널이 쓸 수 있는 높이를 나눠 가진다
+  const resize = (kind: 'colFr' | 'rowFr', i: number, px: number) => {
+    const total = kind === 'colFr' ? (splitRef.current?.clientWidth ?? 0) - (grid.cols - 1) * GUTTER : termHeight(full);
+    if (total > 0) setLayout({ ...layout, [kind]: moveBoundary(kind === 'colFr' ? grid.colFr : grid.rowFr, i, px, total, kind === 'colFr' ? MIN_CELL_WIDTH : MIN_CELL_HEIGHT) });
+  };
   // 탭이 뒤로 가거나 휴대폰 화면이 꺼지면 터미널 스트림을 닫는다. 서버는 "보고 있는 사람 없음"으로 보고 작업 끝남·입력 대기 알림을 보낸다
   const visible = useSyncExternalStore(onVisibility, () => document.visibilityState !== 'hidden');
   // 탭을 앞에 띄워 둔 채 자리를 비워도 마찬가지로 닫는다
@@ -821,7 +989,11 @@ export function TerminalTab({ project: p, now }: Props) {
   // 입력 허용이 바뀌면 칸의 터미널을 새로 만드므로 연결도 새로 열어 첫 화면을 다시 받는다
   const [feedAttempt, setFeedAttempt] = useState(0);
   const feedKey = `${feedAttempt}:${p.allowInput}`;
-  const feed = useSharedFeed(p.id, t.panes.map((x) => x.id).join(','), splitOn && visible && !away, feedKey);
+  const feed = useSharedFeed(p.id, cellIds, splitOn && visible && !away, feedKey);
+  // 나란히 보기에서 입력 대상이 띄우지 않은 터미널이면 첫 칸으로 옮긴다 (안 보이는 터미널로 입력이 가지 않게)
+  useEffect(() => {
+    if (splitOn && pane && !lost && !cellIds.split(',').includes(pane.id)) setPaneId(cellIds.split(',')[0]!);
+  }, [splitOn, pane, lost, cellIds]);
   // 터미널에서 복사·이미지 붙여넣기의 결과를 잠깐 보여 준다
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -963,7 +1135,19 @@ export function TerminalTab({ project: p, now }: Props) {
                 <div className="panes" role="group" aria-label="pane 선택">
                   {t.panes.map((x) => (
                     <span key={x.id} className="pane-tab">
-                      <button type="button" aria-pressed={!lost && x.id === pane.id} onClick={() => setPaneId(x.id)}>
+                      {/* 나란히 보기에 띄울 터미널. 하나는 남긴다 */}
+                      {splitOn && (
+                        <input type="checkbox" className="show" aria-label={`터미널 ${paneNo(x, t.panes)} 나란히 보기에 띄우기`} title="나란히 보기에 띄우기" checked={!hidden.includes(x.id)} disabled={!hidden.includes(x.id) && cells.length === 1} onChange={() => toggleShown(x)} />
+                      )}
+                      <button
+                        type="button"
+                        aria-pressed={!lost && x.id === pane.id}
+                        onClick={() => {
+                          setPaneId(x.id);
+                          // 나란히 보기에서 띄우지 않은 터미널을 고르면 띄운다
+                          if (splitOn && hidden.includes(x.id)) toggleShown(x);
+                        }}
+                      >
                         <span className="dim">{paneNo(x, t.panes)}</span> {progName(x)}
                       </button>
                       {/* 마지막 하나는 닫으면 세션이 끝나므로 세션 종료 버튼에 맡긴다 */}
@@ -1053,6 +1237,15 @@ export function TerminalTab({ project: p, now }: Props) {
                   나란히 보기
                 </button>
               )}
+              {splitOn && (
+                <select className="split-cols" aria-label="나란히 보기 열 수" value={layout.cols} onChange={(e) => setLayout({ ...layout, cols: Number(e.target.value) })}>
+                  {SPLIT_COLS.map((n) => (
+                    <option key={n} value={n}>
+                      {n ? `${n}열` : '열 자동'}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
                 className="more-rows full-toggle"
@@ -1070,12 +1263,30 @@ export function TerminalTab({ project: p, now }: Props) {
             </div>
           )}
           {splitOn ? (
-            <div className="split" style={{ gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))` }}>
+            // 칸과 칸 사이에 경계 트랙을 둔다: 열은 몫(fr)과 경계가 번갈아, 줄은 내용 높이와 경계가 번갈아
+            <div ref={splitRef} className="split" style={{ gridTemplateColumns: grid.colFr.map((f) => `minmax(0, ${f}fr)`).join(` ${GUTTER}px `), gridTemplateRows: Array<string>(grid.rows).fill('auto').join(` ${GUTTER}px `) }}>
               {visible && !away ? (
-                t.panes.map((x, i) => (
-                  // 마지막 줄이 덜 차면 마지막 칸이 남은 자리를 채운다. 크기 맞추기는 윈도우 단위라, 한 윈도우를 나눈 pane 들은 맞추지 않는다
-                  <SplitCell key={`${x.id}:${feedKey}`} project={p} pane={x} no={paneNo(x, t.panes)} selected={!lost && x.id === pane?.id} cols={grid.cols} share={1 / grid.rows} span={i === t.panes.length - 1 ? grid.cols * grid.rows - t.panes.length + 1 : 1} full={full} canFit={canFit && !t.panes.some((y) => y.window === x.window && y.id !== x.id)} feed={feed} onSelect={() => setPaneId(x.id)} onReconnect={() => setFeedAttempt(feedAttempt + 1)} onNotice={showNotice} />
-                ))
+                <>
+                  {cells.map((x, i) => {
+                    const r = Math.floor(i / grid.cols);
+                    const c = i % grid.cols;
+                    // 마지막 줄이 덜 차면 마지막 칸이 남은 자리를 채운다
+                    const span = i === cells.length - 1 ? grid.cols - c : 1;
+                    return (
+                      // 크기 맞추기는 윈도우 단위라, 한 윈도우를 나눈 pane 들은 맞추지 않는다
+                      <SplitCell key={`${x.id}:${feedKey}`} project={p} pane={x} no={paneNo(x, t.panes)} selected={!lost && x.id === pane?.id} place={{ gridColumn: `${2 * c + 1} / ${2 * (c + span)}`, gridRow: 2 * r + 1 }} width={sum(grid.colFr.slice(c, c + span)) / sum(grid.colFr)} share={grid.rowFr[r]! / sum(grid.rowFr)} full={full} canFit={canFit && !t.panes.some((y) => y.window === x.window && y.id !== x.id)} feed={feed} prev={cells[i - 1]?.id ?? null} next={cells[i + 1]?.id ?? null} onSelect={() => setPaneId(x.id)} onSwap={(other) => swap(x.id, other)} onReconnect={() => setFeedAttempt(feedAttempt + 1)} onNotice={showNotice} />
+                    );
+                  })}
+                  {/* 두 열 사이 경계는 줄마다 둔다 (마지막 칸이 넓게 채운 자리에는 없다). 어느 것을 끌어도 그 열 전체가 바뀐다 */}
+                  {grid.colFr.slice(1).flatMap((_, c) =>
+                    Array.from({ length: grid.rows }, (_, r) => r * grid.cols + c + 1).filter((i) => i < cells.length).map((i) => (
+                      <Gutter key={`c${c}:${i}`} dir="col" place={{ gridColumn: 2 * c + 2, gridRow: 2 * Math.floor(i / grid.cols) + 1 }} label={`${c + 1}열과 ${c + 2}열 사이 폭 조절`} onMove={(px) => resize('colFr', c, px)} onReset={() => setLayout({ ...layout, colFr: [] })} />
+                    )),
+                  )}
+                  {grid.rowFr.slice(1).map((_, r) => (
+                    <Gutter key={`r${r}`} dir="row" place={{ gridColumn: '1 / -1', gridRow: 2 * r + 2 }} label={`${r + 1}줄과 ${r + 2}줄 사이 높이 조절`} onMove={(px) => resize('rowFr', r, px)} onReset={() => setLayout({ ...layout, rowFr: [] })} />
+                  ))}
+                </>
               ) : (
                 <p className="dim term-paused">{pausedText}</p>
               )}

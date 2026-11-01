@@ -119,6 +119,8 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
   fullRef.current = full;
   const layout = useRef({ focus, heightShare });
   layout.current = { focus, heightShare };
+  // 글자 크기를 다시 맞춘다 (나란히 보기에서 이 칸의 높이 몫이 바뀌면: 칸 크기는 내용을 따르므로 크기 변화로는 모른다)
+  const refit = useRef(() => {});
   // Codex 는 tmux 의 mouse 옵션이 꺼져 있으면 마우스를 켜지 않지만, 휠 보고를 받으면 대화를 한 줄씩 움직인다
   const wheelReports = useRef(false);
   wheelReports.current = command === 'codex';
@@ -535,6 +537,7 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
     el.addEventListener('touchend', onTouchEnd, { passive: true });
     el.addEventListener('touchcancel', cancelPress, { passive: true });
 
+    refit.current = fitFont;
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(fitFont) : null;
     ro?.observe(el);
     // 컴퓨터에선 높이를 '터미널이 시작하는 곳부터 화면 끝까지'로 잡는다(termsize.ts): 창 높이가 바뀌거나, 위에 오류 안내가 생겨
@@ -563,6 +566,8 @@ export function Term({ projectId, pane, canInput, command, full = false, focus =
       term.dispose();
     };
   }, [projectId, pane, canInput]);
+
+  useEffect(() => refit.current(), [heightShare]);
 
   // 나란히 보기에서 다른 칸을 고르면 그 터미널로 키 입력을 옮긴다 (첫 화면 때만 잡으면 칸을 눌러야 했다)
   useEffect(() => {

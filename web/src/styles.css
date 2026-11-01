@@ -1347,8 +1347,7 @@ pre {
 /* 나란히 보기: 칸마다 이름·상태 띠와 터미널. 고른 칸(입력 대상)은 테두리로 표시 */
 .split {
   display: grid;
-  gap: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--term);
 }
 .split-cell {
   min-width: 0;
@@ -1370,6 +1369,67 @@ pre {
 .split-head .conn {
   margin-left: auto;
 }
+/* 머리를 끌어 다른 칸에 놓으면 자리를 바꾼다. 놓을 칸은 테두리로 */
+.split-head[draggable='true'] {
+  cursor: grab;
+}
+.split-cell.drop {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.split-head .move {
+  min-height: 0;
+  padding: 0 6px;
+  background: transparent;
+  color: inherit;
+}
+.split-head .move:disabled {
+  opacity: 0.3;
+}
+/* 칸 사이 경계: 가운데 선 하나로 보이고, 끄는 동안·가리킬 때는 강조색 */
+.split-gutter {
+  position: relative;
+  touch-action: none;
+  z-index: 1;
+}
+.split-gutter::before {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.08);
+}
+.split-gutter.col {
+  cursor: col-resize;
+}
+.split-gutter.col::before {
+  inset: 0 auto 0 50%;
+  width: 1px;
+}
+.split-gutter.row {
+  cursor: row-resize;
+}
+.split-gutter.row::before {
+  inset: 50% 0 auto 0;
+  height: 1px;
+}
+.split-gutter:hover::before,
+.split-gutter:focus-visible::before,
+.split-gutter.dragging::before {
+  background: var(--accent);
+}
+.split-gutter:focus-visible {
+  outline: none;
+}
+.split-cols {
+  font: inherit;
+  color: var(--text);
+  background: var(--s2);
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 6px 10px;
+}
+.pane-tab .show {
+  margin: 0 0 0 10px;
+  accent-color: var(--accent);
+}
 .split .term-paused {
   grid-column: 1 / -1;
   padding: 8px 10px;
@@ -1381,9 +1441,17 @@ pre {
   }
   .split {
     grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
   }
   .split-cell {
     grid-column: auto !important;
+    grid-row: auto !important;
+  }
+  /* 한 줄로 쌓이니 열 수·경계·자리 바꾸기는 쓸 데가 없다 */
+  .split-gutter,
+  .split-cols,
+  .split-head .move {
+    display: none;
   }
 }
 /* 새 터미널 메뉴: 버튼 아래로 펼쳐 터미널 위에 띄운다 */
