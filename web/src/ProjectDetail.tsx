@@ -747,7 +747,16 @@ export function TerminalTab({ project: p, now }: Props) {
     else if (window.matchMedia?.('(pointer: fine)').matches) window.scrollTo({ top: 0 });
   }, []);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
-  const [paneId, setPaneId] = useState<string | null>(null);
+  // 보던 터미널은 프로젝트마다 이 브라우저에 기억해, 다른 프로젝트·탭에 갔다 와도 그 터미널로 연다 (없어졌으면 활성 pane)
+  const paneKey = `pane:${p.id}`;
+  const [paneId, setPaneId] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem(paneKey);
+      return t.panes.some((x) => x.id === saved) ? saved : null;
+    } catch {
+      return null;
+    }
+  });
   // 고른 pane 이 사라지면 보기는 활성 pane 으로 돌아가지만, 입력은 다시 고를 때까지 막는다 (다른 pane 으로 새지 않게)
   const chosen = t.panes.find((x) => x.id === paneId);
   const lost = paneId !== null && !chosen;
@@ -756,6 +765,14 @@ export function TerminalTab({ project: p, now }: Props) {
   useEffect(() => {
     if (paneId === null && pane) setPaneId(pane.id);
   }, [paneId, pane]);
+  useEffect(() => {
+    if (!paneId) return;
+    try {
+      localStorage.setItem(paneKey, paneId);
+    } catch {
+      // 기억하지 못해도 지금 화면은 그대로다
+    }
+  }, [paneKey, paneId]);
   // 새 터미널: 만든 pane 이 스냅샷에 들어오면 그리로 옮긴다 (그 전에 고르면 "사라진 pane" 으로 보인다)
   const [opening, setOpening] = useState(false);
   // 무엇을 띄울지 고르는 메뉴. 바깥을 누르거나 Esc 면 닫는다
