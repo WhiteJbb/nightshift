@@ -839,6 +839,7 @@ const MENU_WIDTH = 150;
 const splitCols = (n: number) => (n <= 2 ? n : n <= 4 ? 2 : 3);
 /** 고를 수 있는 열 수 (0 은 저절로) */
 const SPLIT_COLS = [0, 1, 2, 3, 4];
+const colsLabel = (n: number) => (n ? `${n}열` : '열 자동');
 /**
  * 나란히 보기의 배치. 프로젝트마다 이 브라우저에 기억한다. hidden: 띄우지 않는 터미널, order: 칸 차례(없는 것은 tmux 차례로 뒤에),
  * cols: 열 수(0 은 터미널 수에 따라), colFr·rowFr: 열·줄의 몫 (개수가 안 맞으면 똑같이 나눈다).
@@ -915,6 +916,15 @@ export function TerminalTab({ project: p, now }: Props) {
   const [menuRight, setMenuRight] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
   useDismiss(menuRef, menuOpen, () => setMenuOpen(false));
+  // 나란히 보기 열 수 메뉴
+  const [colsOpen, setColsOpen] = useState(false);
+  const colsRef = useRef<HTMLSpanElement>(null);
+  const colsButton = useRef<HTMLButtonElement>(null);
+  // 열면 지금 고른 항목으로 초점을 옮겨, 키보드로 바로 ↑↓ 할 수 있게
+  useEffect(() => {
+    if (colsOpen) colsRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [colsOpen]);
+  useDismiss(colsRef, colsOpen, () => setColsOpen(false));
   const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => {
     if (opened && t.panes.some((x) => x.id === opened)) {
@@ -1175,7 +1185,7 @@ export function TerminalTab({ project: p, now }: Props) {
                     </span>
                   ))}
                   {p.allowInput && (
-                    <span className="new-term" ref={menuRef}>
+                    <span className="menu-wrap" ref={menuRef}>
                       <button
                         type="button"
                         aria-haspopup="menu"
@@ -1254,13 +1264,42 @@ export function TerminalTab({ project: p, now }: Props) {
                 </button>
               )}
               {splitOn && (
-                <select className="split-cols" aria-label="나란히 보기 열 수" value={layout.cols} onChange={(e) => setLayout({ ...layout, cols: Number(e.target.value) })}>
-                  {SPLIT_COLS.map((n) => (
-                    <option key={n} value={n}>
-                      {n ? `${n}열` : '열 자동'}
-                    </option>
-                  ))}
-                </select>
+                <span className="menu-wrap split-cols" ref={colsRef}>
+                  <button ref={colsButton} type="button" className="more-rows" aria-haspopup="menu" aria-expanded={colsOpen} title="나란히 보기 열 수" onClick={() => setColsOpen(!colsOpen)}>
+                    {colsLabel(layout.cols)} ▾
+                  </button>
+                  {colsOpen && (
+                    // 고르거나 Esc 로 닫아도 키보드 자리가 버튼에 남게 (메뉴가 사라지며 초점을 잃지 않게)
+                    <span
+                      className="menu"
+                      role="menu"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') colsButton.current?.focus();
+                        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                        e.preventDefault();
+                        const items = [...e.currentTarget.querySelectorAll('button')];
+                        const i = items.indexOf(document.activeElement as HTMLButtonElement);
+                        items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+                      }}
+                    >
+                      {SPLIT_COLS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={n === layout.cols}
+                          onClick={() => {
+                            setLayout({ ...layout, cols: n });
+                            setColsOpen(false);
+                            colsButton.current?.focus();
+                          }}
+                        >
+                          {colsLabel(n)}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </span>
               )}
               <button
                 type="button"
