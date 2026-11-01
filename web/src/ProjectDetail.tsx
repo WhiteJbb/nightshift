@@ -643,6 +643,10 @@ const onVisibility = (cb: () => void) => {
   document.addEventListener('visibilitychange', cb);
   return () => document.removeEventListener('visibilitychange', cb);
 };
+const onResize = (cb: () => void) => {
+  window.addEventListener('resize', cb);
+  return () => window.removeEventListener('resize', cb);
+};
 /** 이만큼 마우스·키보드·터치가 없으면 자리를 비운 것으로 본다 (터미널 연결을 닫아 서버가 다시 알림을 보낸다) */
 const AWAY_MS = 5 * 60_000;
 const ACTIVITY = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
@@ -966,6 +970,8 @@ export function TerminalTab({ project: p, now }: Props) {
   const gridRows = Math.ceil(cells.length / gridCols);
   const grid = { cols: gridCols, rows: gridRows, colFr: shares(layout.colFr, gridCols), rowFr: shares(layout.rowFr, gridRows) };
   const splitRef = useRef<HTMLDivElement>(null);
+  // 창 높이가 바뀌면 다시 그린다: 나란히 보기의 줄 높이를 화면 높이로 잡는다
+  useSyncExternalStore(onResize, () => window.innerHeight);
   const toggleShown = (x: TmuxPane) => setLayout({ ...layout, hidden: hidden.includes(x.id) ? hidden.filter((id) => id !== x.id) : [...hidden, x.id] });
   const swap = (a: string, b: string) => {
     const ids = ordered.map((x) => x.id);
