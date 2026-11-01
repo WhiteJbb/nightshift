@@ -1435,13 +1435,14 @@ pre {
 .split-gutter:focus-visible {
   outline: none;
 }
-.split-cols {
-  font: inherit;
-  color: var(--text);
-  background: var(--s2);
-  border: none;
-  border-radius: var(--r-pill);
-  padding: 6px 10px;
+/* 열 수 메뉴는 짧은 낱말뿐이라 버튼 폭만큼만 */
+.term-bar .split-cols .menu {
+  width: max-content;
+  min-width: 100%;
+}
+.term-bar .menu-wrap .menu button[aria-checked='true'] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
 }
 .pane-tab .show {
   margin: 0 0 0 10px;
@@ -1471,12 +1472,12 @@ pre {
     display: none;
   }
 }
-/* 새 터미널 메뉴: 버튼 아래로 펼쳐 터미널 위에 띄운다 */
-.new-term {
+/* 막대의 펼침 메뉴(새 터미널, 열 수): 버튼 아래로 펼쳐 터미널 위에 띄운다 */
+.menu-wrap {
   position: relative;
   display: inline-flex;
 }
-.new-term .menu {
+.menu-wrap .menu {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -1491,15 +1492,18 @@ pre {
   border-radius: 18px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 }
-.new-term .menu.right {
+.menu-wrap .menu.right {
   left: auto;
   right: 0;
 }
-.term-bar .new-term .menu button {
+.term-bar .menu-wrap .menu button {
   justify-content: flex-start;
+  font-size: var(--fs-sm);
+  padding: 3px 12px;
+  min-height: 26px;
   background: transparent;
 }
-.term-bar .new-term .menu button:hover:not(:disabled) {
+.term-bar .menu-wrap .menu button:hover:not(:disabled) {
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
   transform: none;

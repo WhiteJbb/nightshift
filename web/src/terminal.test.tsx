@@ -761,7 +761,9 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   expect(FakeEventSource.all).toHaveLength(streams); // 자리만 바꾸면 연결은 그대로
   // 열 수를 고르고 경계를 옮긴다: 폭 972px 에서 경계 둘(12px)을 빼면 1fr 이 320px, 화살표 한 번(40px)은 0.125fr.
   // 옆 칸은 최소 폭(240px = 0.75fr)까지만 줄어든다. 두 번 누르면 똑같이
-  fireEvent.change(screen.getByRole('combobox', { name: '나란히 보기 열 수' }), { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: '열 자동 ▾' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '3열' }));
+  expect(screen.queryByRole('menu')).toBeNull();
   expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, 1fr)');
   Object.defineProperty(split(), 'clientWidth', { configurable: true, value: 972 });
   const border = () => screen.getByRole('separator', { name: '1열과 2열 사이 폭 조절' });
@@ -784,7 +786,8 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   const again = project(THREE);
   await renderTab({ ...again, tmux: { ...again.tmux, createdAt: '2026-01-02T00:00:00.000Z' } });
   expect(heads()).toEqual(['0.0', '0.1', '0.2']);
-  expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '나란히 보기 열 수' }).value).toBe('3');
+  fireEvent.click(screen.getByRole('button', { name: '3열 ▾' }));
+  expect(screen.getByRole('menuitemradio', { name: '3열' }).getAttribute('aria-checked')).toBe('true');
 });
 
 test('the stream is closed and the terminal disposed on unmount', async () => {
