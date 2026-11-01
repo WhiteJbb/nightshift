@@ -717,6 +717,74 @@ test('나란히 보기 streams every terminal side by side over one connection; 
   expect(screen.queryByRole('button', { name: '나란히 보기' })).toBeNull();
 });
 
+test('나란히 보기 shows the chosen terminals in the chosen columns and order, with movable borders, and remembers the layout', async () => {
+  const THREE = [...TWO, pane('%3', 2, false, ['three-snap'])];
+  // 깨진 기억은 기본 배치로
+  localStorage.setItem('splitLayout:api', '{"hidden":"%1","cols":9,"colFr":["x"]}');
+  await renderTab(project(THREE));
+  fireEvent.click(screen.getByRole('button', { name: '나란히 보기' }));
+  await tick();
+  const heads = () => Array.from(document.querySelectorAll('.split-head .dim'), (e) => e.textContent);
+  const split = () => document.querySelector<HTMLElement>('.split')!;
+  const open = () => FakeEventSource.all.filter((e) => !e.closed).map((e) => e.url);
+  const target = () => screen.getByText(/^보낼 곳:/).textContent;
+  const show = (no: string) => screen.getByRole<HTMLInputElement>('checkbox', { name: `터미널 ${no} 나란히 보기에 띄우기` });
+  expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr)');
+  // 입력 대상을 숨기면 남은 첫 칸으로 옮긴다. 연결은 띄운 것만 받는다
+  fireEvent.click(show('0.0'));
+  await tick();
+  expect(heads()).toEqual(['0.1', '0.2']);
+  expect(open()).toEqual(['/api/projects/api/terms?panes=%252%2C%253']);
+  expect(target()).toBe('보낼 곳: 0.1 zsh');
+  // 하나는 남긴다
+  fireEvent.click(show('0.1'));
+  await tick();
+  expect(show('0.2').disabled).toBe(true);
+  // 숨긴 터미널의 버튼을 누르면 띄우고 고른다
+  fireEvent.click(screen.getByRole('button', { name: '0.0 zsh' }));
+  await tick();
+  expect(heads()).toEqual(['0.0', '0.2']);
+  expect(target()).toBe('보낼 곳: 0.0 zsh');
+  // 자리 바꾸기: ← 버튼, 머리를 끌어 다른 칸에 놓기
+  fireEvent.click(screen.getByRole('button', { name: '터미널 0.2 앞으로' }));
+  fireEvent.click(show('0.1'));
+  await tick();
+  expect(heads()).toEqual(['0.2', '0.1', '0.0']);
+  const drag = { types: ['application/x-nightshift-pane'], getData: () => '%1' };
+  fireEvent.dragOver(document.querySelectorAll('.split-cell')[0]!, { dataTransfer: drag });
+  const streams = FakeEventSource.all.length;
+  fireEvent.drop(document.querySelectorAll('.split-cell')[0]!, { dataTransfer: drag });
+  expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(FakeEventSource.all).toHaveLength(streams); // 자리만 바꾸면 연결은 그대로
+  // 열 수를 고르고 경계를 옮긴다: 폭 972px 에서 경계 둘(12px)을 빼면 1fr 이 320px, 화살표 한 번(40px)은 0.125fr.
+  // 옆 칸은 최소 폭(240px = 0.75fr)까지만 줄어든다. 두 번 누르면 똑같이
+  fireEvent.change(screen.getByRole('combobox', { name: '나란히 보기 열 수' }), { target: { value: '3' } });
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, 1fr)');
+  Object.defineProperty(split(), 'clientWidth', { configurable: true, value: 972 });
+  const border = () => screen.getByRole('separator', { name: '1열과 2열 사이 폭 조절' });
+  fireEvent.keyDown(border(), { key: 'ArrowRight' });
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1.125fr) 6px minmax(0, 0.875fr) 6px minmax(0, 1fr)');
+  for (let i = 0; i < 5; i++) fireEvent.keyDown(border(), { key: 'ArrowRight' });
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1.25fr) 6px minmax(0, 0.75fr) 6px minmax(0, 1fr)');
+  // 다시 열면 같은 배치
+  cleanup();
+  await renderTab(project(THREE));
+  expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1.25fr) 6px minmax(0, 0.75fr) 6px minmax(0, 1fr)');
+  fireEvent.doubleClick(border());
+  expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, 1fr)');
+  // 세션을 다시 띄우면 pane id 가 다시 쓰이므로 숨김·차례는 버린다 (열 수·몫은 남긴다)
+  fireEvent.click(show('0.1'));
+  fireEvent.click(screen.getByRole('button', { name: '터미널 0.2 앞으로' }));
+  expect(heads()).toEqual(['0.2', '0.0']);
+  cleanup();
+  const again = project(THREE);
+  await renderTab({ ...again, tmux: { ...again.tmux, createdAt: '2026-01-02T00:00:00.000Z' } });
+  expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '나란히 보기 열 수' }).value).toBe('3');
+});
+
 test('the stream is closed and the terminal disposed on unmount', async () => {
   const { unmount } = await renderTab(project(ONE));
   unmount();
