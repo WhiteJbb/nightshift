@@ -782,6 +782,8 @@ function SplitCell({ project: p, pane: x, no, selected, place, width, share, ful
 
 /** 나란히 보기의 칸 사이 경계 두께(px). 끄는 손잡이가 된다 */
 const GUTTER = 6;
+/** 나란히 보기 칸 머리(이름·상태 띠)의 높이(px). styles.css 의 .split-head 와 같다 */
+const SPLIT_HEAD = 26;
 /** 경계를 끌어도 지키는 칸의 최소 폭·높이(px) */
 const MIN_CELL_WIDTH = 240;
 const MIN_CELL_HEIGHT = 120;
@@ -971,6 +973,11 @@ export function TerminalTab({ project: p, now }: Props) {
   const gridCols = Math.max(1, Math.min(layout.cols || splitCols(cells.length), cells.length));
   const gridRows = Math.ceil(cells.length / gridCols);
   const grid = { cols: gridCols, rows: gridRows, colFr: shares(layout.colFr, gridCols), rowFr: shares(layout.rowFr, gridRows) };
+  // 터미널들이 나눠 가질 높이: 칸 머리와 줄 사이 경계는 뺀다 (안 빼면 줄 수만큼 화면 아래로 넘친다). 아주 작은 화면에서도 절반은 준다
+  const areaHeight = termHeight(full);
+  const termsHeight = Math.max(areaHeight / 2, areaHeight - grid.rows * SPLIT_HEAD - (grid.rows - 1) * GUTTER);
+  /** r 번째 줄 터미널의 높이 몫 (termHeight 에 대한 비율) */
+  const rowShare = (r: number) => (grid.rowFr[r]! / sum(grid.rowFr)) * (termsHeight / areaHeight);
   const splitRef = useRef<HTMLDivElement>(null);
   // 창 높이가 바뀌면 다시 그린다: 나란히 보기의 줄 높이를 화면 높이로 잡는다
   useSyncExternalStore(onResize, () => window.innerHeight);
@@ -986,7 +993,7 @@ export function TerminalTab({ project: p, now }: Props) {
   };
   // 경계를 옮긴다: 열은 격자 폭(경계 두께를 뺀다), 줄은 터미널이 쓸 수 있는 높이를 나눠 가진다
   const resize = (kind: 'colFr' | 'rowFr', i: number, px: number) => {
-    const total = kind === 'colFr' ? (splitRef.current?.clientWidth ?? 0) - (grid.cols - 1) * GUTTER : termHeight(full);
+    const total = kind === 'colFr' ? (splitRef.current?.clientWidth ?? 0) - (grid.cols - 1) * GUTTER : termsHeight;
     if (total > 0) setLayout({ ...layout, [kind]: moveBoundary(kind === 'colFr' ? grid.colFr : grid.rowFr, i, px, total, kind === 'colFr' ? MIN_CELL_WIDTH : MIN_CELL_HEIGHT) });
   };
   // 탭이 뒤로 가거나 휴대폰 화면이 꺼지면 터미널 스트림을 닫는다. 서버는 "보고 있는 사람 없음"으로 보고 작업 끝남·입력 대기 알림을 보낸다
@@ -1274,7 +1281,7 @@ export function TerminalTab({ project: p, now }: Props) {
           {splitOn ? (
             // 칸과 칸 사이에 경계 트랙을 둔다: 열은 몫(fr)과 경계가, 줄은 높이와 경계가 번갈아. 줄도 적어도 높이 몫만큼 잡아,
             // 크기를 못 맞추는 터미널(다른 터미널이 붙은 세션, 한 윈도우를 나눈 pane)도 경계를 옮긴 만큼 칸이 바뀐다
-            <div ref={splitRef} className="split" style={{ gridTemplateColumns: grid.colFr.map((f) => `minmax(0, ${f}fr)`).join(` ${GUTTER}px `), gridTemplateRows: grid.rowFr.map((f) => `minmax(${Math.floor((f / sum(grid.rowFr)) * termHeight(full))}px, auto)`).join(` ${GUTTER}px `) }}>
+            <div ref={splitRef} className="split" style={{ gridTemplateColumns: grid.colFr.map((f) => `minmax(0, ${f}fr)`).join(` ${GUTTER}px `), gridTemplateRows: grid.rowFr.map((_, r) => `minmax(${Math.floor(SPLIT_HEAD + rowShare(r) * areaHeight)}px, auto)`).join(` ${GUTTER}px `) }}>
               {visible && !away ? (
                 <>
                   {cells.map((x, i) => {
@@ -1284,7 +1291,7 @@ export function TerminalTab({ project: p, now }: Props) {
                     const span = i === cells.length - 1 ? grid.cols - c : 1;
                     return (
                       // 크기 맞추기는 윈도우 단위라, 한 윈도우를 나눈 pane 들은 맞추지 않는다
-                      <SplitCell key={`${x.id}:${feedKey}`} project={p} pane={x} no={paneNo(x, t.panes)} selected={!lost && x.id === pane?.id} place={{ gridColumn: `${2 * c + 1} / ${2 * (c + span)}`, gridRow: 2 * r + 1 }} width={sum(grid.colFr.slice(c, c + span)) / sum(grid.colFr)} share={grid.rowFr[r]! / sum(grid.rowFr)} full={full} canFit={canFit && !t.panes.some((y) => y.window === x.window && y.id !== x.id)} feed={feed} prev={cells[i - 1]?.id ?? null} next={cells[i + 1]?.id ?? null} onSelect={() => setPaneId(x.id)} onSwap={(other) => swap(x.id, other)} onReconnect={() => setFeedAttempt(feedAttempt + 1)} onNotice={showNotice} />
+                      <SplitCell key={`${x.id}:${feedKey}`} project={p} pane={x} no={paneNo(x, t.panes)} selected={!lost && x.id === pane?.id} place={{ gridColumn: `${2 * c + 1} / ${2 * (c + span)}`, gridRow: 2 * r + 1 }} width={sum(grid.colFr.slice(c, c + span)) / sum(grid.colFr)} share={rowShare(r)} full={full} canFit={canFit && !t.panes.some((y) => y.window === x.window && y.id !== x.id)} feed={feed} prev={cells[i - 1]?.id ?? null} next={cells[i + 1]?.id ?? null} onSelect={() => setPaneId(x.id)} onSwap={(other) => swap(x.id, other)} onReconnect={() => setFeedAttempt(feedAttempt + 1)} onNotice={showNotice} />
                     );
                   })}
                   {/* 두 열 사이 경계는 줄마다 둔다 (마지막 칸이 넓게 채운 자리에는 없다). 어느 것을 끌어도 그 열 전체가 바뀐다 */}

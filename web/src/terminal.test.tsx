@@ -731,6 +731,8 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   const show = (no: string) => screen.getByRole<HTMLInputElement>('checkbox', { name: `터미널 ${no} 나란히 보기에 띄우기` });
   expect(heads()).toEqual(['0.0', '0.1', '0.2']);
   expect(split().style.gridTemplateColumns).toBe('minmax(0, 1fr) 6px minmax(0, 1fr)');
+  // 줄 높이는 칸 머리(26px)와 줄 사이 경계(6px)를 뺀 높이를 나눈다: 쓸 수 있는 높이(768 × 0.7 = 537.6px) 안에 다 들어간다
+  expect(split().style.gridTemplateRows).toBe('minmax(265px, auto) 6px minmax(265px, auto)');
   // 입력 대상을 숨기면 남은 첫 칸으로 옮긴다. 연결은 띄운 것만 받는다
   fireEvent.click(show('0.0'));
   await tick();
