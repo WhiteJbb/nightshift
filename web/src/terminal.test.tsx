@@ -166,6 +166,7 @@ beforeEach(() => {
   vi.stubGlobal('EventSource', FakeEventSource);
   FakeEventSource.all = [];
   FakeTerminal.all = [];
+  localStorage.clear();
 });
 afterEach(() => {
   cleanup();
@@ -492,6 +493,20 @@ test('a long press shows the terminal as plain text (only the visible columns, w
   expect(screen.queryByLabelText(/터미널 글/)).toBeNull();
   expect(FakeTerminal.all).toHaveLength(1);
   expect(es().closed).toBe(false);
+});
+
+test('the terminal looked at last opens again after going to another project; if it is gone, the active one opens', async () => {
+  await renderTab(project(TWO));
+  fireEvent.click(screen.getByRole('button', { name: '0.1 zsh' }));
+  await tick();
+  cleanup();
+  await renderTab(project(TWO));
+  expect(screen.getByRole('button', { name: '0.1 zsh' }).getAttribute('aria-pressed')).toBe('true');
+  expect(es().url).toBe('/api/projects/api/term/%252');
+  cleanup();
+  await renderTab(project([TWO[0]!, pane('%3', 1, false, ['three-snap'])]));
+  expect(screen.getByRole('button', { name: '0.0 zsh' }).getAttribute('aria-pressed')).toBe('true');
+  expect(es().url).toBe('/api/projects/api/term/%251');
 });
 
 test('picking text ends when another pane is chosen, so coming back shows the live terminal', async () => {
