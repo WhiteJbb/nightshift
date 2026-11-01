@@ -920,6 +920,10 @@ export function TerminalTab({ project: p, now }: Props) {
   const [colsOpen, setColsOpen] = useState(false);
   const colsRef = useRef<HTMLSpanElement>(null);
   const colsButton = useRef<HTMLButtonElement>(null);
+  // 열면 지금 고른 항목으로 초점을 옮겨, 키보드로 바로 ↑↓ 할 수 있게
+  useEffect(() => {
+    if (colsOpen) colsRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [colsOpen]);
   useDismiss(colsRef, colsOpen, () => setColsOpen(false));
   const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => {
@@ -1266,7 +1270,18 @@ export function TerminalTab({ project: p, now }: Props) {
                   </button>
                   {colsOpen && (
                     // 고르거나 Esc 로 닫아도 키보드 자리가 버튼에 남게 (메뉴가 사라지며 초점을 잃지 않게)
-                    <span className="menu" role="menu" onKeyDown={(e) => e.key === 'Escape' && colsButton.current?.focus()}>
+                    <span
+                      className="menu"
+                      role="menu"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') colsButton.current?.focus();
+                        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                        e.preventDefault();
+                        const items = [...e.currentTarget.querySelectorAll('button')];
+                        const i = items.indexOf(document.activeElement as HTMLButtonElement);
+                        items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+                      }}
+                    >
                       {SPLIT_COLS.map((n) => (
                         <button
                           key={n}

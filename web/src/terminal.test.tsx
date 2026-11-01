@@ -762,6 +762,13 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   // 열 수를 고르고 경계를 옮긴다: 폭 972px 에서 경계 둘(12px)을 빼면 1fr 이 320px, 화살표 한 번(40px)은 0.125fr.
   // 옆 칸은 최소 폭(240px = 0.75fr)까지만 줄어든다. 두 번 누르면 똑같이
   fireEvent.click(screen.getByRole('button', { name: '열 자동 ▾' }));
+  // 열면 고른 항목에 초점, 화살표로 움직인다 (위로 가면 끝으로 돈다)
+  expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: '열 자동' }));
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+  expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: '4열' }));
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  expect(document.activeElement).toBe(screen.getByRole('menuitemradio', { name: '1열' }));
   fireEvent.click(screen.getByRole('menuitemradio', { name: '3열' }));
   expect(screen.queryByRole('menu')).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '3열 ▾' })); // 키보드 자리는 버튼에 남는다
