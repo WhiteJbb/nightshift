@@ -989,7 +989,8 @@ export function TerminalTab({ project: p, now }: Props) {
   // 입력 허용이 바뀌면 칸의 터미널을 새로 만드므로 연결도 새로 열어 첫 화면을 다시 받는다
   const [feedAttempt, setFeedAttempt] = useState(0);
   const feedKey = `${feedAttempt}:${p.allowInput}`;
-  const feed = useSharedFeed(p.id, cellIds, splitOn && visible && !away, feedKey);
+  // 연결은 띄운 터미널이 바뀔 때만 다시 연다 (자리만 바꾸면 그대로: 다시 열면 칸마다 첫 화면부터 다시 그린다)
+  const feed = useSharedFeed(p.id, [...cellIds.split(',')].sort().join(','), splitOn && visible && !away, feedKey);
   // 나란히 보기에서 입력 대상이 띄우지 않은 터미널이면 첫 칸으로 옮긴다 (안 보이는 터미널로 입력이 가지 않게)
   useEffect(() => {
     if (splitOn && pane && !lost && !cellIds.split(',').includes(pane.id)) setPaneId(cellIds.split(',')[0]!);
@@ -1263,8 +1264,9 @@ export function TerminalTab({ project: p, now }: Props) {
             </div>
           )}
           {splitOn ? (
-            // 칸과 칸 사이에 경계 트랙을 둔다: 열은 몫(fr)과 경계가 번갈아, 줄은 내용 높이와 경계가 번갈아
-            <div ref={splitRef} className="split" style={{ gridTemplateColumns: grid.colFr.map((f) => `minmax(0, ${f}fr)`).join(` ${GUTTER}px `), gridTemplateRows: Array<string>(grid.rows).fill('auto').join(` ${GUTTER}px `) }}>
+            // 칸과 칸 사이에 경계 트랙을 둔다: 열은 몫(fr)과 경계가, 줄은 높이와 경계가 번갈아. 줄도 적어도 높이 몫만큼 잡아,
+            // 크기를 못 맞추는 터미널(다른 터미널이 붙은 세션, 한 윈도우를 나눈 pane)도 경계를 옮긴 만큼 칸이 바뀐다
+            <div ref={splitRef} className="split" style={{ gridTemplateColumns: grid.colFr.map((f) => `minmax(0, ${f}fr)`).join(` ${GUTTER}px `), gridTemplateRows: grid.rowFr.map((f) => `minmax(${Math.floor((f / sum(grid.rowFr)) * termHeight(full))}px, auto)`).join(` ${GUTTER}px `) }}>
               {visible && !away ? (
                 <>
                   {cells.map((x, i) => {

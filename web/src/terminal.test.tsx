@@ -753,8 +753,10 @@ test('나란히 보기 shows the chosen terminals in the chosen columns and orde
   expect(heads()).toEqual(['0.2', '0.1', '0.0']);
   const drag = { types: ['application/x-nightshift-pane'], getData: () => '%1' };
   fireEvent.dragOver(document.querySelectorAll('.split-cell')[0]!, { dataTransfer: drag });
+  const streams = FakeEventSource.all.length;
   fireEvent.drop(document.querySelectorAll('.split-cell')[0]!, { dataTransfer: drag });
   expect(heads()).toEqual(['0.0', '0.1', '0.2']);
+  expect(FakeEventSource.all).toHaveLength(streams); // 자리만 바꾸면 연결은 그대로
   // 열 수를 고르고 경계를 옮긴다: 폭 972px 에서 경계 둘(12px)을 빼면 1fr 이 320px, 화살표 한 번(40px)은 0.125fr.
   // 옆 칸은 최소 폭(240px = 0.75fr)까지만 줄어든다. 두 번 누르면 똑같이
   fireEvent.change(screen.getByRole('combobox', { name: '나란히 보기 열 수' }), { target: { value: '3' } });

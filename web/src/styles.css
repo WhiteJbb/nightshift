@@ -1350,12 +1350,22 @@ pre {
   background: var(--term);
 }
 .split-cell {
+  position: relative;
+  isolation: isolate;
   min-width: 0;
   background: var(--term);
+}
+/* 테두리는 칸 위에 덮어 그린다: 터미널이 칸보다 작거나(줄 높이를 늘림) 칸을 덮어도 보이게 */
+.split-cell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
   box-shadow: inset 0 0 0 1px transparent;
   transition: box-shadow 180ms ease;
 }
-.split-cell.selected {
+.split-cell.selected::after {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 .split-head {
@@ -1373,7 +1383,7 @@ pre {
 .split-head[draggable='true'] {
   cursor: grab;
 }
-.split-cell.drop {
+.split-cell.drop::after {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 .split-head .move {
