@@ -271,6 +271,7 @@ export class Monitor {
     return this.serial(async () => {
       this.tracked.clear();
       this.looked.clear();
+      this.rebased.clear();
       this.startedAt = new Date(this.now()).toISOString();
       await this.collectAll();
     });

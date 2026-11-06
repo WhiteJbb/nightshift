@@ -781,6 +781,12 @@ describe('followRepo to a folder beside the configured one', () => {
       await m.tick();
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
       pane.cwd = home;
+      // 처음부터 다시 세면(reset) 기다리던 것도 버리고 지금 화면으로 다시 찾는다
+      output = [];
+      await m.setConfig(cfg('과제 (2)'), collector);
+      output = old;
+      await m.reset();
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
 
       // pwd 처럼 줄 끝에 나온 폴더도 센다 (같은 수면 나중에 나온 것)
       output = [`  └ ${down}/과제(3)/제출.zip`, '• Ran pwd', `  └ ${down}/과제_4  `];
