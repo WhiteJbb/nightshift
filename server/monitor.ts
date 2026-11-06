@@ -350,7 +350,6 @@ export class Monitor {
    * 홈에서 띄운 에이전트가 절대경로로만 다루면 명령의 작업 폴더로는 알 수 없어서, 화면의 경로에 가장 많이 나온 옆 폴더를 본다.
    */
   private async followRepo(p: ProjectConfig, raw: RawTmux): Promise<{ project: ProjectConfig; git: GitInfo }> {
-    const rebased = this.rebased.delete(p.id);
     const git = await this.opts.collector.git(p);
     if (git.ok || git.error !== NOT_A_REPO) return { project: p, git };
     const paneCwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
@@ -370,6 +369,9 @@ export class Monitor {
     const before = this.looked.get(p.id);
     // 화면을 못 읽었거나 위로 올려 보는 중이면 지난번 본 것을 그대로 둔다 (내려왔을 때 그대로인 화면을 새 일로 보지 않게)
     const readable = raw.output.length > 0 && !scrolledUp(raw.output);
+    // 설정에서 경로를 바꾼 뒤 화면을 읽을 수 있을 때 그 화면을 기준으로 삼는다 (못 읽으면 다음에)
+    const rebased = this.rebased.has(p.id) && (readable || !nearby);
+    if (rebased) this.rebased.delete(p.id);
     let beside = nearby && !readable ? (before?.beside ?? null) : null;
     if (nearby && readable) {
       // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)

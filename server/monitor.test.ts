@@ -737,8 +737,15 @@ describe('followRepo to a folder beside the configured one', () => {
       await m.tick();
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
 
-      // 설정에서 과제_4 로 바꾼다. 화면에 남은 과제(3) 으로 다시 따라가지 않는다
+      // 설정에서 과제_4 로 바꾼다. 화면에 남은 과제(3) 으로 다시 따라가지 않는다. 바꿀 때 화면을 못 읽었어도 (비었거나 위로 올려 보는 중)
+      const old = output;
+      output = [];
       await m.setConfig(cfg('과제_4'), collector);
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
+      output = [...old, '  Jump to bottom (click) ↓', '─'.repeat(20), '> ', '─'.repeat(20)];
+      await m.tick();
+      output = old;
+      await m.tick();
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
       await m.tick();
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
