@@ -152,6 +152,8 @@ export class Monitor {
   private workSeen = new Map<string, Map<number, string | null>>();
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
   private looked = new Map<string, { cwd: string | null; beside: string | null }>();
+  /** 설정에서 경로를 바꾼 프로젝트: 다음에 볼 때는 그때 화면을 기준으로만 삼는다 (followRepo) */
+  private rebased = new Set<string>();
   /**
    * 일부러 꺼 둔 프로젝트 → 끈 tmux 세션의 이름과 생성 시각 (꺼진 것을 봤거나 이미 꺼진 것을 표시했으면 created 는 null).
    * 생성 시각이 다른 세션이 뜨면 다시 켠 것이라 뺀다. 프로젝트가 보는 세션 이름이 바뀌어도 뺀다. 새 모니터링 세션(reset)으로도 풀리지 않는다.
@@ -175,9 +177,15 @@ export class Monitor {
     this.off = new Map(Object.entries(opts.restore?.off ?? {}).map(([id, session]) => [id, { session, created: null }]));
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
-      // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
+      // 꺼진 사이 설정에서 경로를 바꿨으면 따라간 폴더까지 버린다 (실행 중에 바꾼 것과 같다: setConfig).
+      // 그대로면 따라간 저장소(followRepo)를 이어받고, 경로가 달라졌으면 collectOne 이 기준점을 버린다.
+      if (saved && (saved.configured ?? saved.repoPath) !== p.repoPath) {
+        this.rebased.add(p.id);
+        continue;
+      }
       if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, paneQuiet: saved.paneQuiet ?? {}, busyAt: saved.busyAt ?? null });
       if (saved?.looked) this.looked.set(p.id, saved.looked);
+      if (saved?.rebased) this.rebased.add(p.id);
     }
     this.snapshot = this.build();
   }
@@ -201,6 +209,7 @@ export class Monitor {
           this.tracked.delete(id);
           this.collected.delete(id);
           this.looked.delete(id);
+          this.rebased.add(id);
         }
       }
       this.opts = { ...this.opts, config, collector, configMissing };
@@ -228,7 +237,7 @@ export class Monitor {
     // 그런 세션을 오래 쓰게 되면 id 로 함께 저장한다
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, configured: p.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null, rebased: this.rebased.has(p.id) };
     }
     return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
@@ -262,6 +271,7 @@ export class Monitor {
     return this.serial(async () => {
       this.tracked.clear();
       this.looked.clear();
+      this.rebased.clear();
       this.startedAt = new Date(this.now()).toISOString();
       await this.collectAll();
     });
@@ -361,6 +371,9 @@ export class Monitor {
     const before = this.looked.get(p.id);
     // 화면을 못 읽었거나 위로 올려 보는 중이면 지난번 본 것을 그대로 둔다 (내려왔을 때 그대로인 화면을 새 일로 보지 않게)
     const readable = raw.output.length > 0 && !scrolledUp(raw.output);
+    // 설정에서 경로를 바꾼 뒤 기준으로 삼을 화면을 아직 못 읽었는지 (읽을 수 있게 되면 그 화면이 기준이다)
+    const rebased = this.rebased.has(p.id);
+    if (rebased && (readable || !nearby)) this.rebased.delete(p.id);
     let beside = nearby && !readable ? (before?.beside ?? null) : null;
     if (nearby && readable) {
       // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)
@@ -385,8 +398,11 @@ export class Monitor {
     // 처음 볼 때는 둘 다 보되 화면이 먼저다 (에이전트를 등록한 폴더에서 띄우고 옆 폴더에서 일할 수 있다)
     const seen = { cwd: cwd ?? before?.cwd ?? null, beside };
     this.looked.set(p.id, seen);
+    // 설정에서 경로를 바꾼 뒤에는 그때의 pane 폴더와 처음 읽은 화면을 기준으로 삼는다: 바꾸기 전의 일로 옛 폴더를 다시 따라가지 않게.
+    // 화면을 못 읽는 사이 pane 이 cd 로 옮긴 것은 센다
+    const base = rebased ? { cwd: before?.cwd ?? seen.cwd, beside } : before;
     const inRepo = !!(cwd && roots.get(cwd));
-    const changed = inRepo ? [] : before ? [seen.cwd !== before.cwd ? cwd : null, beside !== before.beside ? beside : null] : [beside, cwd];
+    const changed = inRepo ? [] : base ? [seen.cwd !== base.cwd ? cwd : null, beside !== base.beside ? beside : null] : [beside, cwd];
     const tried = new Set<string>();
     for (const dir of new Set([...changed, inRepo ? cwd : undefined, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
       const root = dir ? (roots.get(dir) ?? (sibling(dir) ? dir : null)) : null;
