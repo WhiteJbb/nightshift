@@ -771,6 +771,17 @@ describe('followRepo to a folder beside the configured one', () => {
       delete saved.tracked.ppo!.configured;
       expect(await restarted('과제_4', saved)).toBe(path.join(down, '과제_4'));
 
+      // 바꿀 때 pane 이 옛 폴더에 있어도 따라가지 않고, 화면을 못 읽는 사이 cd 로 옮긴 것은 따라간다
+      output = [];
+      pane.cwd = path.join(down, '과제 (2)');
+      await m.setConfig(cfg('과제(3)'), collector);
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+      pane.cwd = path.join(down, '과제_4');
+      output = old;
+      await m.tick();
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
+      pane.cwd = home;
+
       // pwd 처럼 줄 끝에 나온 폴더도 센다 (같은 수면 나중에 나온 것)
       output = [`  └ ${down}/과제(3)/제출.zip`, '• Ran pwd', `  └ ${down}/과제_4  `];
       const first = new Monitor({ config: cfg('과제 (2)'), collector, runs: noRuns, now: () => T0 });

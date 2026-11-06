@@ -370,9 +370,9 @@ export class Monitor {
     const before = this.looked.get(p.id);
     // 화면을 못 읽었거나 위로 올려 보는 중이면 지난번 본 것을 그대로 둔다 (내려왔을 때 그대로인 화면을 새 일로 보지 않게)
     const readable = raw.output.length > 0 && !scrolledUp(raw.output);
-    // 설정에서 경로를 바꾼 뒤 화면을 읽을 수 있을 때 그 화면을 기준으로 삼는다 (못 읽으면 다음에)
-    const rebased = this.rebased.has(p.id) && (readable || !nearby);
-    if (rebased) this.rebased.delete(p.id);
+    // 설정에서 경로를 바꾼 뒤 기준으로 삼을 화면을 아직 못 읽었는지 (읽을 수 있게 되면 그 화면이 기준이다)
+    const rebased = this.rebased.has(p.id);
+    if (rebased && (readable || !nearby)) this.rebased.delete(p.id);
     let beside = nearby && !readable ? (before?.beside ?? null) : null;
     if (nearby && readable) {
       // 입력칸에 치는 중인 글은 일하는 곳이 아니다: Claude Code 는 가로줄 사이, Codex 는 맨 아래 "› " 줄부터 (보낸 글도 "› " 로 남지만 입력칸이 늘 그 아래다)
@@ -397,8 +397,9 @@ export class Monitor {
     // 처음 볼 때는 둘 다 보되 화면이 먼저다 (에이전트를 등록한 폴더에서 띄우고 옆 폴더에서 일할 수 있다)
     const seen = { cwd: cwd ?? before?.cwd ?? null, beside };
     this.looked.set(p.id, seen);
-    // 설정에서 경로를 바꾼 직후에는 지금 화면을 기준으로만 삼는다: 바꾸기 전의 일이 남은 화면으로 옛 폴더를 다시 따라가지 않게
-    const base = rebased ? seen : before;
+    // 설정에서 경로를 바꾼 뒤에는 그때의 pane 폴더와 처음 읽은 화면을 기준으로 삼는다: 바꾸기 전의 일로 옛 폴더를 다시 따라가지 않게.
+    // 화면을 못 읽는 사이 pane 이 cd 로 옮긴 것은 센다
+    const base = rebased ? { cwd: before?.cwd ?? seen.cwd, beside } : before;
     const inRepo = !!(cwd && roots.get(cwd));
     const changed = inRepo ? [] : base ? [seen.cwd !== base.cwd ? cwd : null, beside !== base.beside ? beside : null] : [beside, cwd];
     const tried = new Set<string>();
