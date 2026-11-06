@@ -10,6 +10,8 @@ export interface TrackedState {
   repoPath: string;
   /** 이 상태를 쌓을 때의 설정 경로 (repoPath 는 따라간 폴더일 수 있다). 꺼진 사이 설정 경로가 바뀌었으면 버린다 (예전 파일에는 없다: repoPath 로 본다) */
   configured?: string;
+  /** 설정에서 경로를 바꾼 뒤 아직 기준으로 삼을 화면을 못 읽었는지 (Monitor.rebased) */
+  rebased?: boolean;
   baseline: GitBaseline | null;
   gitChangedAt: string | null;
   /** 어느 로그 파일의 어디까지 확인했는지. 로그 파일이 바뀌면 버린다. */

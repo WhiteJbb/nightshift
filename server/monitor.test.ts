@@ -744,7 +744,11 @@ describe('followRepo to a folder beside the configured one', () => {
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
       output = [...old, '  Jump to bottom (click) ↓', '─'.repeat(20), '> ', '─'.repeat(20)];
       await m.tick();
+      // 그사이 다시 띄워도
+      const pending = new Monitor({ config: cfg('과제_4'), collector, runs: noRuns, now: () => T0, restore: JSON.parse(JSON.stringify(m.exportState())) });
       output = old;
+      await pending.tick();
+      expect(pending.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
       await m.tick();
       expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
       await m.tick();

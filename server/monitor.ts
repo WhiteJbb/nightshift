@@ -185,6 +185,7 @@ export class Monitor {
       }
       if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, paneQuiet: saved.paneQuiet ?? {}, busyAt: saved.busyAt ?? null });
       if (saved?.looked) this.looked.set(p.id, saved.looked);
+      if (saved?.rebased) this.rebased.add(p.id);
     }
     this.snapshot = this.build();
   }
@@ -236,7 +237,7 @@ export class Monitor {
     // 그런 세션을 오래 쓰게 되면 id 로 함께 저장한다
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, configured: p.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, configured: p.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null, rebased: this.rebased.has(p.id) };
     }
     return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
