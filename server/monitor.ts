@@ -152,6 +152,8 @@ export class Monitor {
   private workSeen = new Map<string, Map<number, string | null>>();
   /** 프로젝트마다 지난 tick 에 본 pane 의 폴더와 화면에 가장 많이 나온 옆 폴더 (followRepo) */
   private looked = new Map<string, { cwd: string | null; beside: string | null }>();
+  /** 설정에서 경로를 바꾼 프로젝트: 다음에 볼 때는 그때 화면을 기준으로만 삼는다 (followRepo) */
+  private rebased = new Set<string>();
   /**
    * 일부러 꺼 둔 프로젝트 → 끈 tmux 세션의 이름과 생성 시각 (꺼진 것을 봤거나 이미 꺼진 것을 표시했으면 created 는 null).
    * 생성 시각이 다른 세션이 뜨면 다시 켠 것이라 뺀다. 프로젝트가 보는 세션 이름이 바뀌어도 뺀다. 새 모니터링 세션(reset)으로도 풀리지 않는다.
@@ -175,7 +177,12 @@ export class Monitor {
     this.off = new Map(Object.entries(opts.restore?.off ?? {}).map(([id, session]) => [id, { session, created: null }]));
     for (const p of opts.config.projects) {
       const saved = opts.restore?.tracked[p.id];
-      // 경로가 달라졌으면 collectOne 이 기준점을 버린다. 따라간 저장소(followRepo)는 여기서 그대로 이어받는다.
+      // 꺼진 사이 설정에서 경로를 바꿨으면 따라간 폴더까지 버린다 (실행 중에 바꾼 것과 같다: setConfig).
+      // 그대로면 따라간 저장소(followRepo)를 이어받고, 경로가 달라졌으면 collectOne 이 기준점을 버린다.
+      if (saved && (saved.configured ?? saved.repoPath) !== p.repoPath) {
+        this.rebased.add(p.id);
+        continue;
+      }
       if (saved) this.tracked.set(p.id, { ...newTracked(saved.repoPath), baseline: saved.baseline, gitChangedAt: saved.gitChangedAt, logFile: saved.logFile, logPos: saved.logPos, logErrors: saved.logErrors ?? [], outputChangedAt: saved.outputChangedAt ?? null, agent: saved.agent ?? false, paneQuiet: saved.paneQuiet ?? {}, busyAt: saved.busyAt ?? null });
       if (saved?.looked) this.looked.set(p.id, saved.looked);
     }
@@ -201,6 +208,7 @@ export class Monitor {
           this.tracked.delete(id);
           this.collected.delete(id);
           this.looked.delete(id);
+          this.rebased.add(id);
         }
       }
       this.opts = { ...this.opts, config, collector, configMissing };
@@ -228,7 +236,7 @@ export class Monitor {
     // 그런 세션을 오래 쓰게 되면 id 로 함께 저장한다
     for (const p of this.opts.config.projects) {
       const tr = this.tracked.get(p.id);
-      if (tr) tracked[p.id] = { repoPath: tr.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
+      if (tr) tracked[p.id] = { repoPath: tr.repoPath, configured: p.repoPath, baseline: tr.baseline, gitChangedAt: tr.gitChangedAt, logFile: tr.logFile, logPos: tr.logPos, logErrors: tr.logErrors, outputChangedAt: tr.outputChangedAt, agent: tr.agent, paneQuiet: tr.paneQuiet, busyAt: tr.busyAt, looked: this.looked.get(p.id) ?? null };
     }
     return { startedAt: this.startedAt, tracked, off: Object.fromEntries([...this.off].map(([id, o]) => [id, o.session])) };
   }
@@ -342,6 +350,7 @@ export class Monitor {
    * 홈에서 띄운 에이전트가 절대경로로만 다루면 명령의 작업 폴더로는 알 수 없어서, 화면의 경로에 가장 많이 나온 옆 폴더를 본다.
    */
   private async followRepo(p: ProjectConfig, raw: RawTmux): Promise<{ project: ProjectConfig; git: GitInfo }> {
+    const rebased = this.rebased.delete(p.id);
     const git = await this.opts.collector.git(p);
     if (git.ok || git.error !== NOT_A_REPO) return { project: p, git };
     const paneCwd = raw.panes.find((x) => x.active)?.cwd || raw.panes[0]?.cwd;
@@ -385,8 +394,10 @@ export class Monitor {
     // 처음 볼 때는 둘 다 보되 화면이 먼저다 (에이전트를 등록한 폴더에서 띄우고 옆 폴더에서 일할 수 있다)
     const seen = { cwd: cwd ?? before?.cwd ?? null, beside };
     this.looked.set(p.id, seen);
+    // 설정에서 경로를 바꾼 직후에는 지금 화면을 기준으로만 삼는다: 바꾸기 전의 일이 남은 화면으로 옛 폴더를 다시 따라가지 않게
+    const base = rebased ? seen : before;
     const inRepo = !!(cwd && roots.get(cwd));
-    const changed = inRepo ? [] : before ? [seen.cwd !== before.cwd ? cwd : null, beside !== before.beside ? beside : null] : [beside, cwd];
+    const changed = inRepo ? [] : base ? [seen.cwd !== base.cwd ? cwd : null, beside !== base.beside ? beside : null] : [beside, cwd];
     const tried = new Set<string>();
     for (const dir of new Set([...changed, inRepo ? cwd : undefined, ...fresh, followed, ...(procs ?? []).map((x) => x.dir)])) {
       const root = dir ? (roots.get(dir) ?? (sibling(dir) ? dir : null)) : null;

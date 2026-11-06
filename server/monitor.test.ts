@@ -10,6 +10,7 @@ import { collectGit, repoRoot } from './git.ts';
 import type { Collector, RawTmux } from './monitor.ts';
 import { attachCommand, Monitor, NO_LOG, READY_TICKS } from './monitor.ts';
 import { Runner } from './runner.ts';
+import type { MonitorState } from './state.ts';
 import { cleanOutput } from './tmux.ts';
 
 const T0 = Date.parse('2026-10-04T03:00:00Z');
@@ -713,6 +714,61 @@ describe('followRepo to a folder beside the configured one', () => {
       rmSync(home, { recursive: true });
     }
     // 실제 git 을 여러 번 돌린다 (혼자서도 2~3초. 전체를 같이 돌리면 기본 5초를 넘기도 한다)
+  }, 20_000);
+
+  it('keeps the folder chosen in settings even while the screen still shows the old one, and counts a path at the end of a line', async () => {
+    const home = realpathSync(mkdtempSync(path.join(tmpdir(), 'nightshift-home-')));
+    const was = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const down = path.join(home, 'Downloads');
+      for (const d of ['과제 (2)', '과제(3)', '과제_4']) mkdirSync(path.join(down, d), { recursive: true });
+      const cfg = (dir: string) => parseConfig({ projects: [{ name: 'ppo', repoPath: path.join(down, dir), tmuxSession: 'ppo' }] }, '/base');
+      let output = [`  └ ${down}/과제(3)/제출.zip`, `  └ ${down}/과제(3)/보고서.pdf`];
+      const pane = { id: '%1', window: 0, windowName: 'w', index: 0, command: 'codex', active: true, cols: 80, lines: [], cwd: home };
+      const collector: Collector = {
+        git: async (p) => collectGit(p.repoPath),
+        since: async (_p, baseline) => ({ baseline, commits: [], files: [], additions: 0, deletions: 0 }),
+        tmux: async () => new Map([['ppo', { configured: true, exists: true, createdAt: null, attached: false, lastActivityAt: null, output, panes: [pane], waitingPrompt: null, attachCommand: 'x' }]]),
+        logErrors: async () => NO_LOG,
+        repoRoot,
+      };
+      const m = new Monitor({ config: cfg('과제 (2)'), collector, runs: noRuns, now: () => T0 });
+      await m.tick();
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제(3)'));
+
+      // 설정에서 과제_4 로 바꾼다. 화면에 남은 과제(3) 으로 다시 따라가지 않는다
+      await m.setConfig(cfg('과제_4'), collector);
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
+      await m.tick();
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
+      // 그 뒤에 에이전트가 다른 옆 폴더에서 일하기 시작하면 따라간다
+      output = [...output, `• Edited ${down}/과제 (2)/a.py`, `• Edited ${down}/과제 (2)/b.py`, `• Edited ${down}/과제 (2)/c.py`];
+      await m.tick();
+      expect(m.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제 (2)'));
+
+      // 다시 띄우면 따라간 폴더를 이어받는다. 꺼진 사이 설정 경로를 바꿨으면 화면에 남은 옛 일로 따라가지 않는다
+      const saved = JSON.parse(JSON.stringify(m.exportState())) as MonitorState;
+      const restarted = async (dir: string, state: MonitorState) => {
+        const r = new Monitor({ config: cfg(dir), collector, runs: noRuns, now: () => T0, restore: state });
+        await r.tick();
+        return r.snapshot.projects[0]!.repoPath;
+      };
+      expect(await restarted('과제_4', saved)).toBe(path.join(down, '과제 (2)'));
+      expect(await restarted('과제(3)', saved)).toBe(path.join(down, '과제(3)'));
+      // 설정 경로를 저장하지 않던 예전 파일은 따라간 폴더를 설정 경로와 견준다
+      delete saved.tracked.ppo!.configured;
+      expect(await restarted('과제_4', saved)).toBe(path.join(down, '과제_4'));
+
+      // pwd 처럼 줄 끝에 나온 폴더도 센다 (같은 수면 나중에 나온 것)
+      output = [`  └ ${down}/과제(3)/제출.zip`, '• Ran pwd', `  └ ${down}/과제_4  `];
+      const first = new Monitor({ config: cfg('과제 (2)'), collector, runs: noRuns, now: () => T0 });
+      await first.tick();
+      expect(first.snapshot.projects[0]!.repoPath).toBe(path.join(down, '과제_4'));
+    } finally {
+      process.env.HOME = was;
+      rmSync(home, { recursive: true });
+    }
   }, 20_000);
 });
 
